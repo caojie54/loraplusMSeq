@@ -14,19 +14,16 @@ OUTPUT_ROOT=${OUTPUT_ROOT:-/mnt/dhwfile/raise/user/caojie/loraplusMSeq/outputs/c
 RANK=${RANK:-32}
 LORA_LR=${LORA_LR:-1e-4}
 MODULE_LR=${MODULE_LR:-1e-5}
-COMP_TOP_K=${COMP_TOP_K:-0}
 COMP_RATIO=${COMP_RATIO:-0.005}
 SELECTION_INTERVAL=${SELECTION_INTERVAL:-50}
 if [[ "${METHOD}" == "lora" ]]; then
   NUM_TRAIN_EPOCHS=${NUM_TRAIN_EPOCHS:-2}
+  SAVE_MERGED_MODEL=${SAVE_MERGED_MODEL:-false}
 else
   NUM_TRAIN_EPOCHS=${NUM_TRAIN_EPOCHS:-1}
+  SAVE_MERGED_MODEL=${SAVE_MERGED_MODEL:-true}
 fi
-if [[ "${COMP_TOP_K}" -gt 0 ]]; then
-  COMP_DESC=topk${COMP_TOP_K}
-else
-  COMP_DESC=ratio${COMP_RATIO}
-fi
+COMP_DESC=ratio${COMP_RATIO}
 RUN_NAME=${RUN_NAME:-llama-3-1-8b-seq-${METHOD}-qkvogateupdown-rank${RANK}-commonsense170k-epoch${NUM_TRAIN_EPOCHS}-${COMP_DESC}-block${SELECTION_INTERVAL}-loralr${LORA_LR}-modulelr${MODULE_LR}}
 EVAL_AFTER_TRAIN=${EVAL_AFTER_TRAIN:-1}
 
@@ -53,8 +50,8 @@ python train.py \
   --warmup_steps=200 \
   --weight_decay=0.0 \
   --selection_interval="${SELECTION_INTERVAL}" \
-  --compensation_top_k="${COMP_TOP_K}" \
   --compensation_ratio="${COMP_RATIO}" \
+  --save_merged_model="${SAVE_MERGED_MODEL}" \
   --output_dir="${OUTPUT_ROOT}" \
   --run_name="${RUN_NAME}"
 

@@ -55,6 +55,9 @@ def configure_tokenizer(tokenizer, model_path: str) -> None:
 def resolve_model_path(model_path: str) -> str:
     if os.path.isdir(os.path.join(model_path, "merged")):
         return os.path.join(model_path, "merged")
+    adapter_path = os.path.join(model_path, "adapter")
+    if os.path.exists(os.path.join(adapter_path, "adapter_config.json")):
+        return adapter_path
     return model_path
 
 
@@ -134,4 +137,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

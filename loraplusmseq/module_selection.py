@@ -76,8 +76,7 @@ class CompensationModuleManager:
         model: nn.Module,
         target_modules: Sequence[str],
         method: str,
-        top_k: int = 8,
-        param_ratio: float = 0.0,
+        param_ratio: float = 0.005,
         seed: int = 0,
         alpha_score: str = "lora_update_ratio",
         history_path: Optional[str] = None,
@@ -85,7 +84,6 @@ class CompensationModuleManager:
         self.model = model
         self.target_modules = list(target_modules)
         self.method = method
-        self.top_k = top_k
         self.param_ratio = param_ratio
         self.rng = random.Random(seed)
         self.alpha_score = alpha_score
@@ -97,6 +95,8 @@ class CompensationModuleManager:
         self.selection_step = -1
         self.selection_records: List[Dict[str, object]] = []
         self.total_candidate_params = sum(candidate.num_params for candidate in self.candidates)
+        if self.enabled and (not math.isfinite(self.param_ratio) or self.param_ratio <= 0):
+            raise ValueError("compensation_ratio must be a positive finite value when module replay is enabled.")
         self._register_managed_params()
         self.record_selection([], step=-1, reason="init")
 
@@ -118,7 +118,6 @@ class CompensationModuleManager:
                 {
                     "target_modules": self.target_modules,
                     "method": self.method,
-                    "top_k": self.top_k,
                     "param_ratio": self.param_ratio,
                     "total_candidate_params": self.total_candidate_params,
                     "candidates": [candidate.to_json() for candidate in self.candidates],
@@ -219,9 +218,6 @@ class CompensationModuleManager:
         """Uniform random baseline: sample without replacement instead of taking model order."""
         if not self.candidates:
             return []
-        if self.top_k > 0:
-            return self.rng.sample(self.candidates, min(self.top_k, len(self.candidates)))
-
         shuffled_candidates = list(self.candidates)
         self.rng.shuffle(shuffled_candidates)
         return self._choose_ranked_by_budget(shuffled_candidates)
@@ -229,10 +225,8 @@ class CompensationModuleManager:
     def _choose_ranked_by_budget(self, ranked_candidates: Sequence[CandidateModule]) -> List[CandidateModule]:
         if not ranked_candidates:
             return []
-        if self.top_k > 0:
-            return list(ranked_candidates[: self.top_k])
-        if self.param_ratio <= 0:
-            return [ranked_candidates[0]]
+        if not math.isfinite(self.param_ratio) or self.param_ratio <= 0:
+            raise ValueError("compensation_ratio must be a positive finite value.")
 
         budget = max(1, int(self.total_candidate_params * self.param_ratio))
         selected: List[CandidateModule] = []
@@ -337,4 +331,3 @@ def set_lora_only_trainable(model: nn.Module) -> None:
     """Freeze all non-LoRA parameters before sequential training starts."""
     for name, param in model.named_parameters():
         param.requires_grad_("lora_" in name)
-

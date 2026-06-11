@@ -39,10 +39,7 @@ def build_output_dir(args) -> str:
     targets = "".join([x.split("_")[0] for x in args.target_modules])
     method_name = f"seq-{args.method}"
     if args.method != "lora":
-        if args.compensation_top_k > 0:
-            method_name += f"-top{args.compensation_top_k}"
-        else:
-            method_name += f"-ratio{args.compensation_ratio}"
+        method_name += f"-ratio{args.compensation_ratio}"
         method_name += f"-interval{args.selection_interval}"
         if args.method == "alpha":
             method_name += f"-{args.alpha_score}"
@@ -89,12 +86,11 @@ def parse_args():
     parser.add_argument("--max_grad_norm", type=float, default=1.0)
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--selection_interval", type=int, default=50, help="Number of LoRA optimizer steps per n-batch.")
-    parser.add_argument("--compensation_top_k", type=int, default=0, help="Number of original modules to train.")
     parser.add_argument(
         "--compensation_ratio",
         type=float,
         default=0.005,
-        help="Candidate-parameter budget used only when compensation_top_k <= 0.",
+        help="Fraction of candidate original-module parameters to train in each module replay block.",
     )
     parser.add_argument(
         "--alpha_score",
@@ -199,7 +195,6 @@ def main():
         model=model,
         target_modules=args.target_modules,
         method=args.method,
-        top_k=args.compensation_top_k,
         param_ratio=args.compensation_ratio,
         seed=args.seed,
         alpha_score=args.alpha_score,
