@@ -27,3 +27,4 @@ srun -p sciverse_agent --job-name=test_df --ntasks-per-node=1 --cpus-per-task=24
 
 Outputs are written under `/mnt/dhwfile/raise/user/caojie/loraplusMSeq/outputs/commonsense170k` by default.
 
+After training, each run also writes `trainable_params.json` in the run output directory. It records the LoRA trainable parameter count once, module trainable parameter counts by replay block for `alpha` and `dynamic_random`, a single reused module count for `static_random`, plus module-phase, phase-average, and whole-training average trainable parameter counts. The key averages are also copied into `train_metrics.json`.

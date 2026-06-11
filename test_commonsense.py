@@ -38,7 +38,7 @@ def parse_args():
     parser.add_argument("--max_new_tokens", type=int, default=64)
     parser.add_argument("--batch_size", type=int, default=256)
     parser.add_argument("--bf16", action="store_true", default=True)
-    parser.add_argument("--trust_remote_code", action="store_true", default=False)
+    parser.add_argument("--trust_remote_code", action="store_true", default=True)
     return parser.parse_args()
 
 

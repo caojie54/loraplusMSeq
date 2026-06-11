@@ -74,15 +74,24 @@ class SequentialLoraPlusMTrainer:
         self._module_optimizer_key: Optional[Tuple[str, ...]] = None
         self._module_optimizer: Optional[torch.optim.Optimizer] = None
         self._train_log_path = os.path.join(output_dir, "train_log.jsonl")
+        self._trainable_params_path = os.path.join(output_dir, "trainable_params.json")
+        self._lora_trainable_params = 0
+        self._module_param_records: List[Dict[str, object]] = []
+        self._static_module_params_recorded = False
 
-    def train(self) -> Dict[str, float]:
+    def train(self) -> Dict[str, object]:
         os.makedirs(self.output_dir, exist_ok=True)
         if os.path.exists(self._train_log_path):
             os.remove(self._train_log_path)
+        if os.path.exists(self._trainable_params_path):
+            os.remove(self._trainable_params_path)
+        self._module_param_records = []
+        self._static_module_params_recorded = False
 
         start = time.time()
         self.model.train()
         self.module_manager.set_lora_phase()
+        self._record_lora_trainable_params()
 
         lora_optimizer = self._create_optimizer(self.module_manager.lora_named_parameters(), self.learning_rate)
         self.total_lora_updates = self._planned_lora_updates()
@@ -122,6 +131,7 @@ class SequentialLoraPlusMTrainer:
         progress.close()
         self.module_manager.set_lora_phase()
         runtime = time.time() - start
+        trainable_param_stats = self._save_trainable_param_stats()
         metrics = {
             "train_runtime": runtime,
             "train_updates": float(self.global_step),
@@ -129,6 +139,10 @@ class SequentialLoraPlusMTrainer:
             "module_updates": float(self.module_step),
             "train_lora_loss": float(sum(losses["lora"]) / max(1, len(losses["lora"]))),
             "train_module_loss": float(sum(losses["module"]) / max(1, len(losses["module"]))),
+            "lora_trainable_params": trainable_param_stats["lora_trainable_params"],
+            "module_average_trainable_params": trainable_param_stats["module_average_trainable_params"],
+            "phase_average_trainable_params": trainable_param_stats["phase_average_trainable_params"],
+            "overall_average_trainable_params": trainable_param_stats["overall_average_trainable_params"],
         }
         with open(os.path.join(self.output_dir, "train_metrics.json"), "w", encoding="utf-8") as f:
             json.dump(metrics, f, ensure_ascii=False, indent=2)
@@ -195,6 +209,7 @@ class SequentialLoraPlusMTrainer:
 
         self._select_modules_for_block(block_scores)
         self.module_manager.set_module_phase()
+        self._record_module_trainable_params(block)
         module_optimizer = self._get_module_optimizer()
         if module_optimizer is None:
             return
@@ -215,6 +230,124 @@ class SequentialLoraPlusMTrainer:
             self._maybe_log(losses, phase="module")
 
         self.module_manager.freeze_all_compensation()
+
+    def _record_lora_trainable_params(self) -> None:
+        self._lora_trainable_params = self._count_unique_params(self.module_manager.lora_named_parameters())
+        current_trainable = self._count_current_trainable_params()
+        print(
+            f"[loraplusMSeq] lora trainable params={self._lora_trainable_params} "
+            f"current_trainable={current_trainable}",
+            flush=True,
+        )
+
+    def _record_module_trainable_params(self, block: List[UpdateBatch]) -> None:
+        method = self.module_manager.method
+        if method == "static_random" and self._static_module_params_recorded:
+            return
+
+        module_trainable_params = self._count_unique_params(self.module_manager.selected_module_named_parameters())
+        current_trainable = self._count_current_trainable_params()
+        selected_record = self.module_manager.selection_records[-1] if self.module_manager.selection_records else {}
+        record = {
+            "block_index": len(self._module_param_records) + 1,
+            "lora_step": int(self.lora_step),
+            "module_step_start": int(self.module_step),
+            "block_update_count": int(len(block)),
+            "method": method,
+            "selection_reason": selected_record.get("reason"),
+            "applies_to_all_module_blocks": method == "static_random",
+            "selected_module_count": int(len(self.module_manager.selected_names)),
+            "selected_names": list(self.module_manager.selected_names),
+            "module_trainable_params": int(module_trainable_params),
+            "current_trainable_params": int(current_trainable),
+            "selected_param_ratio": float(module_trainable_params / max(1, self.module_manager.total_candidate_params)),
+        }
+        self._module_param_records.append(record)
+        if method == "static_random":
+            self._static_module_params_recorded = True
+        print(
+            f"[loraplusMSeq] module trainable params block={record['block_index']} "
+            f"params={module_trainable_params} current_trainable={current_trainable}",
+            flush=True,
+        )
+
+    def _save_trainable_param_stats(self) -> Dict[str, object]:
+        module_average = self._module_average_trainable_params()
+        module_weighted_total = self._module_weighted_trainable_total(module_average)
+        phase_average = self._phase_average_trainable_params(module_average)
+        overall_updates = self.lora_step + self.module_step
+        if overall_updates > 0:
+            overall_average = (
+                self._lora_trainable_params * self.lora_step + module_weighted_total
+            ) / overall_updates
+        else:
+            overall_average = float(self._lora_trainable_params)
+
+        stats: Dict[str, object] = {
+            "method": self.module_manager.method,
+            "lora_trainable_params": int(self._lora_trainable_params),
+            "module_trainable_params_by_block": list(self._module_param_records),
+            "module_average_trainable_params": module_average,
+            "phase_average_trainable_params": phase_average,
+            "overall_average_trainable_params": float(overall_average),
+            "lora_updates": int(self.lora_step),
+            "module_updates": int(self.module_step),
+            "total_model_params": int(self._count_total_model_params()),
+            "total_candidate_module_params": int(self.module_manager.total_candidate_params),
+        }
+        with open(self._trainable_params_path, "w", encoding="utf-8") as f:
+            json.dump(stats, f, ensure_ascii=False, indent=2)
+        print(f"[loraplusMSeq] trainable param stats saved to {self._trainable_params_path}", flush=True)
+        return stats
+
+    def _module_average_trainable_params(self) -> Optional[float]:
+        if self.module_manager.method == "lora" or not self._module_param_records:
+            return None
+        if self.module_manager.method == "static_random":
+            return float(self._module_param_records[0]["module_trainable_params"])
+
+        total_weight = sum(int(record["block_update_count"]) for record in self._module_param_records)
+        if total_weight <= 0:
+            return 0.0
+        weighted_sum = sum(
+            int(record["module_trainable_params"]) * int(record["block_update_count"])
+            for record in self._module_param_records
+        )
+        return float(weighted_sum / total_weight)
+
+    def _phase_average_trainable_params(self, module_average: Optional[float]) -> float:
+        if self.module_manager.method == "lora" or module_average is None:
+            return float(self._lora_trainable_params)
+        return float((self._lora_trainable_params + module_average) / 2.0)
+
+    def _module_weighted_trainable_total(self, module_average: Optional[float]) -> float:
+        if self.module_manager.method == "lora" or self.module_step <= 0 or module_average is None:
+            return 0.0
+        if self.module_manager.method == "static_random":
+            return float(module_average * self.module_step)
+        return float(
+            sum(
+                int(record["module_trainable_params"]) * int(record["block_update_count"])
+                for record in self._module_param_records
+            )
+        )
+
+    def _count_unique_params(self, named_params: Iterable[Tuple[str, torch.nn.Parameter]]) -> int:
+        seen = set()
+        total = 0
+        for _, param in named_params:
+            param_id = id(param)
+            if param_id in seen:
+                continue
+            seen.add(param_id)
+            total += param.numel()
+        return int(total)
+
+    def _count_current_trainable_params(self) -> int:
+        return int(sum(param.numel() for param in self.model.parameters() if param.requires_grad))
+
+    def _count_total_model_params(self) -> int:
+        return int(sum(param.numel() for param in self.model.parameters()))
 
     def _select_modules_for_block(self, block_scores: Dict[str, float]) -> None:
         method = self.module_manager.method

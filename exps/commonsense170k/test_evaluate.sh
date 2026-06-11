@@ -4,7 +4,7 @@ set -euo pipefail
 source /mnt/petrelfs/caojie1/anaconda3/etc/profile.d/conda.sh
 conda activate comol
 
-MODEL_DIR=/mnt/dhwfile/raise/user/caojie/loraplusMSeq/outputs/commonsense170k/llama-3-1-8b-lora-qkvogateupdown-rank32-commonsense170k-epoch2
+MODEL_DIR=/mnt/dhwfile/raise/user/caojie/loraplusMSeq/outputs/commonsense170k/llama-3-1-8b-lora-qkvogateupdown-rank32-commonsense170k-epoch1
 
 python test_commonsense.py \
   --model_path "${MODEL_DIR}" \
