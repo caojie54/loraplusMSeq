@@ -34,6 +34,7 @@ class SequentialLoraPlusMTrainer:
         gradient_accumulation_steps: int,
         num_train_epochs: float,
         learning_rate: float,
+        module_learning_rate: float,
         weight_decay: float,
         warmup_steps: int,
         lr_scheduler_type: str,
@@ -53,6 +54,7 @@ class SequentialLoraPlusMTrainer:
         self.gradient_accumulation_steps = max(1, gradient_accumulation_steps)
         self.num_train_epochs = num_train_epochs
         self.learning_rate = learning_rate
+        self.module_learning_rate = module_learning_rate
         self.weight_decay = weight_decay
         self.warmup_steps = warmup_steps
         self.lr_scheduler_type = lr_scheduler_type
@@ -82,7 +84,7 @@ class SequentialLoraPlusMTrainer:
         self.model.train()
         self.module_manager.set_lora_phase()
 
-        lora_optimizer = self._create_optimizer(self.module_manager.lora_named_parameters())
+        lora_optimizer = self._create_optimizer(self.module_manager.lora_named_parameters(), self.learning_rate)
         self.total_lora_updates = self._planned_lora_updates()
         replay_multiplier = 1 if self.module_manager.method == "lora" else 2
         self.total_updates = self.total_lora_updates * replay_multiplier
@@ -168,7 +170,7 @@ class SequentialLoraPlusMTrainer:
         block_scores: Dict[str, float],
     ) -> float:
         self.module_manager.set_lora_phase()
-        self._set_optimizer_lr(optimizer)
+        self._set_optimizer_lr(optimizer, self.learning_rate)
         optimizer.zero_grad(set_to_none=True)
 
         loss_value = self._backward_update_batch(update_batch)
@@ -198,7 +200,7 @@ class SequentialLoraPlusMTrainer:
             return
 
         for update_batch in block:
-            self._set_optimizer_lr(module_optimizer)
+            self._set_optimizer_lr(module_optimizer, self.module_learning_rate)
             module_optimizer.zero_grad(set_to_none=True)
             module_loss = self._backward_update_batch(update_batch)
             module_params = [param for _, param in self.module_manager.selected_module_named_parameters()]
@@ -262,7 +264,11 @@ class SequentialLoraPlusMTrainer:
         except StopIteration:
             return torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    def _create_optimizer(self, named_params: List[Tuple[str, torch.nn.Parameter]]) -> torch.optim.Optimizer:
+    def _create_optimizer(
+        self,
+        named_params: List[Tuple[str, torch.nn.Parameter]],
+        learning_rate: float,
+    ) -> torch.optim.Optimizer:
         decay_params: List[torch.nn.Parameter] = []
         no_decay_params: List[torch.nn.Parameter] = []
         for name, param in named_params:
@@ -276,7 +282,7 @@ class SequentialLoraPlusMTrainer:
             {"params": decay_params, "weight_decay": self.weight_decay},
             {"params": no_decay_params, "weight_decay": 0.0},
         ]
-        return torch.optim.AdamW(param_groups, lr=self.learning_rate)
+        return torch.optim.AdamW(param_groups, lr=learning_rate)
 
     def _get_module_optimizer(self) -> Optional[torch.optim.Optimizer]:
         named_params = self.module_manager.selected_module_named_parameters()
@@ -284,7 +290,7 @@ class SequentialLoraPlusMTrainer:
             return None
         key = tuple(name for name, _ in named_params)
         if self._module_optimizer is None or key != self._module_optimizer_key:
-            self._module_optimizer = self._create_optimizer(named_params)
+            self._module_optimizer = self._create_optimizer(named_params, self.module_learning_rate)
             self._module_optimizer_key = key
         return self._module_optimizer
 
@@ -292,24 +298,24 @@ class SequentialLoraPlusMTrainer:
         no_decay_terms = ("bias", "layer_norm.weight", "LayerNorm.weight", "norm.weight")
         return not any(term in name for term in no_decay_terms)
 
-    def _set_optimizer_lr(self, optimizer: torch.optim.Optimizer) -> None:
-        lr = self._lr_for_step(self.global_step)
+    def _set_optimizer_lr(self, optimizer: torch.optim.Optimizer, base_lr: float) -> None:
+        lr = self._lr_for_step(self.global_step, base_lr)
         for group in optimizer.param_groups:
             group["lr"] = lr
 
-    def _lr_for_step(self, completed_steps: int) -> float:
+    def _lr_for_step(self, completed_steps: int, base_lr: float) -> float:
         if self.lr_scheduler_type == "constant":
-            return self.learning_rate
+            return base_lr
         if self.lr_scheduler_type == "constant_with_warmup":
             if self.warmup_steps <= 0:
-                return self.learning_rate
-            return self.learning_rate * min(1.0, completed_steps / self.warmup_steps)
+                return base_lr
+            return base_lr * min(1.0, completed_steps / self.warmup_steps)
         if self.lr_scheduler_type == "linear":
             if self.warmup_steps > 0 and completed_steps < self.warmup_steps:
-                return self.learning_rate * completed_steps / self.warmup_steps
+                return base_lr * completed_steps / self.warmup_steps
             remaining = max(0, self.total_updates - completed_steps)
             decay_steps = max(1, self.total_updates - self.warmup_steps)
-            return self.learning_rate * remaining / decay_steps
+            return base_lr * remaining / decay_steps
         raise ValueError(f"Unsupported lr_scheduler_type: {self.lr_scheduler_type}")
 
     def _clip_gradients(self, params: List[torch.nn.Parameter]) -> None:
@@ -326,7 +332,8 @@ class SequentialLoraPlusMTrainer:
             "lora_step": self.lora_step,
             "module_step": self.module_step,
             "phase": phase,
-            "lr": self._lr_for_step(self.global_step),
+            "lora_lr": self._lr_for_step(self.global_step, self.learning_rate),
+            "module_lr": self._lr_for_step(self.global_step, self.module_learning_rate),
             "lora_loss": sum(losses["lora"][-self.logging_steps :]) / max(1, len(losses["lora"][-self.logging_steps :])),
             "module_loss": sum(losses["module"][-self.logging_steps :])
             / max(1, len(losses["module"][-self.logging_steps :])),

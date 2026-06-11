@@ -77,6 +77,7 @@ def parse_args():
     parser.add_argument("--gradient_accumulation_steps", type=int, default=1)
     parser.add_argument("--num_train_epochs", type=float, default=1.0)
     parser.add_argument("--learning_rate", type=float, default=1e-4)
+    parser.add_argument("--module_learning_rate", type=float, default=1e-5)
     parser.add_argument(
         "--lr_scheduler_type",
         type=str,
@@ -88,17 +89,17 @@ def parse_args():
     parser.add_argument("--max_grad_norm", type=float, default=1.0)
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--selection_interval", type=int, default=50, help="Number of LoRA optimizer steps per n-batch.")
-    parser.add_argument("--compensation_top_k", type=int, default=8, help="Number of original modules to train.")
+    parser.add_argument("--compensation_top_k", type=int, default=0, help="Number of original modules to train.")
     parser.add_argument(
         "--compensation_ratio",
         type=float,
-        default=0.0,
+        default=0.005,
         help="Candidate-parameter budget used only when compensation_top_k <= 0.",
     )
     parser.add_argument(
         "--alpha_score",
         type=str,
-        default="lora_update_ratio",
+        default="lora_grad_norm",
         choices=["lora_update_ratio", "lora_grad_norm"],
         help="Score accumulated from LoRA gradients during the LoRA phase.",
     )
@@ -219,6 +220,7 @@ def main():
         gradient_accumulation_steps=args.gradient_accumulation_steps,
         num_train_epochs=args.num_train_epochs,
         learning_rate=args.learning_rate,
+        module_learning_rate=args.module_learning_rate,
         weight_decay=args.weight_decay,
         warmup_steps=args.warmup_steps,
         lr_scheduler_type=args.lr_scheduler_type,
@@ -247,4 +249,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

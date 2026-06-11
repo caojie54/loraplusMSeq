@@ -12,14 +12,22 @@ DATASET_PATH=${DATASET_PATH:-/mnt/petrelfs/caojie1/projects/CoMoL/datasets/commo
 EVAL_DATA_PATH=${EVAL_DATA_PATH:-/mnt/petrelfs/caojie1/projects/CoMoL/datasets/math_commonsense}
 OUTPUT_ROOT=${OUTPUT_ROOT:-/mnt/dhwfile/raise/user/caojie/loraplusMSeq/outputs/commonsense170k}
 RANK=${RANK:-32}
-COMP_TOP_K=${COMP_TOP_K:-8}
+LORA_LR=${LORA_LR:-1e-4}
+MODULE_LR=${MODULE_LR:-1e-5}
+COMP_TOP_K=${COMP_TOP_K:-0}
+COMP_RATIO=${COMP_RATIO:-0.005}
 SELECTION_INTERVAL=${SELECTION_INTERVAL:-50}
 if [[ "${METHOD}" == "lora" ]]; then
   NUM_TRAIN_EPOCHS=${NUM_TRAIN_EPOCHS:-2}
 else
   NUM_TRAIN_EPOCHS=${NUM_TRAIN_EPOCHS:-1}
 fi
-RUN_NAME=${RUN_NAME:-llama-3-1-8b-seq-${METHOD}-qkvogateupdown-rank${RANK}-commonsense170k-epoch${NUM_TRAIN_EPOCHS}}
+if [[ "${COMP_TOP_K}" -gt 0 ]]; then
+  COMP_DESC=topk${COMP_TOP_K}
+else
+  COMP_DESC=ratio${COMP_RATIO}
+fi
+RUN_NAME=${RUN_NAME:-llama-3-1-8b-seq-${METHOD}-qkvogateupdown-rank${RANK}-commonsense170k-epoch${NUM_TRAIN_EPOCHS}-${COMP_DESC}-block${SELECTION_INTERVAL}-loralr${LORA_LR}-modulelr${MODULE_LR}}
 EVAL_AFTER_TRAIN=${EVAL_AFTER_TRAIN:-1}
 
 python train.py \
@@ -39,12 +47,14 @@ python train.py \
   --batch_size=16 \
   --gradient_accumulation_steps=2 \
   --num_train_epochs="${NUM_TRAIN_EPOCHS}" \
-  --learning_rate=1e-4 \
+  --learning_rate="${LORA_LR}" \
+  --module_learning_rate="${MODULE_LR}" \
   --lr_scheduler_type=constant_with_warmup \
   --warmup_steps=200 \
   --weight_decay=0.0 \
   --selection_interval="${SELECTION_INTERVAL}" \
   --compensation_top_k="${COMP_TOP_K}" \
+  --compensation_ratio="${COMP_RATIO}" \
   --output_dir="${OUTPUT_ROOT}" \
   --run_name="${RUN_NAME}"
 
@@ -58,4 +68,3 @@ if [[ "${EVAL_AFTER_TRAIN}" == "1" ]]; then
 
   python evaluate_commonsense.py --predict_file "${MODEL_DIR}/predictions/boolq_responses.jsonl"
 fi
-
