@@ -44,6 +44,7 @@ class SequentialLoraPlusMTrainer:
         bf16: bool,
         max_grad_norm: float = 1.0,
         dataloader_num_workers: int = 0,
+        lora_optimizer_reset_strategy: str = "keep",
     ) -> None:
         self.model = model
         self.train_dataset = train_dataset
@@ -64,6 +65,9 @@ class SequentialLoraPlusMTrainer:
         self.bf16 = bf16
         self.max_grad_norm = max_grad_norm
         self.dataloader_num_workers = dataloader_num_workers
+        self.lora_optimizer_reset_strategy = lora_optimizer_reset_strategy
+        if self.lora_optimizer_reset_strategy not in {"keep", "reset_all", "reset_selected"}:
+            raise ValueError(f"Unsupported lora_optimizer_reset_strategy: {self.lora_optimizer_reset_strategy}")
 
         self.global_step = 0
         self.lora_step = 0
@@ -78,6 +82,8 @@ class SequentialLoraPlusMTrainer:
         self._lora_trainable_params = 0
         self._module_param_records: List[Dict[str, object]] = []
         self._static_module_params_recorded = False
+        self._lora_optimizer_reset_events = 0
+        self._lora_optimizer_reset_params = 0
 
     def train(self) -> Dict[str, object]:
         os.makedirs(self.output_dir, exist_ok=True)
@@ -87,6 +93,8 @@ class SequentialLoraPlusMTrainer:
             os.remove(self._trainable_params_path)
         self._module_param_records = []
         self._static_module_params_recorded = False
+        self._lora_optimizer_reset_events = 0
+        self._lora_optimizer_reset_params = 0
 
         start = time.time()
         self.model.train()
@@ -119,14 +127,16 @@ class SequentialLoraPlusMTrainer:
                 self._maybe_log(losses, phase="lora")
 
                 if len(block) >= self.selection_interval:
-                    self._run_module_replay_block(block, block_scores, losses, progress)
+                    if self._run_module_replay_block(block, block_scores, losses, progress):
+                        lora_optimizer = self._reset_lora_optimizer_after_module_replay(lora_optimizer)
                     block = []
                     block_scores = defaultdict(float)
 
             epoch_index += 1
 
         if block:
-            self._run_module_replay_block(block, block_scores, losses, progress)
+            if self._run_module_replay_block(block, block_scores, losses, progress):
+                lora_optimizer = self._reset_lora_optimizer_after_module_replay(lora_optimizer)
 
         progress.close()
         self.module_manager.set_lora_phase()
@@ -143,6 +153,9 @@ class SequentialLoraPlusMTrainer:
             "module_average_trainable_params": trainable_param_stats["module_average_trainable_params"],
             "phase_average_trainable_params": trainable_param_stats["phase_average_trainable_params"],
             "overall_average_trainable_params": trainable_param_stats["overall_average_trainable_params"],
+            "lora_optimizer_reset_strategy": self.lora_optimizer_reset_strategy,
+            "lora_optimizer_reset_events": int(self._lora_optimizer_reset_events),
+            "lora_optimizer_reset_params": int(self._lora_optimizer_reset_params),
         }
         with open(os.path.join(self.output_dir, "train_metrics.json"), "w", encoding="utf-8") as f:
             json.dump(metrics, f, ensure_ascii=False, indent=2)
@@ -203,16 +216,18 @@ class SequentialLoraPlusMTrainer:
         block_scores: Dict[str, float],
         losses: Dict[str, List[float]],
         progress: tqdm,
-    ) -> None:
+    ) -> bool:
         if self.module_manager.method == "lora":
-            return
+            return False
 
         self._select_modules_for_block(block_scores)
         self.module_manager.set_module_phase()
         self._record_module_trainable_params(block)
-        module_optimizer = self._get_module_optimizer()
+        module_optimizer = self._get_module_optimizer(
+            force_recreate=self.module_manager.method in {"alpha", "dynamic_random"}
+        )
         if module_optimizer is None:
-            return
+            return False
 
         for update_batch in block:
             self._set_optimizer_lr(module_optimizer, self.module_learning_rate)
@@ -230,6 +245,46 @@ class SequentialLoraPlusMTrainer:
             self._maybe_log(losses, phase="module")
 
         self.module_manager.freeze_all_compensation()
+        return True
+
+    def _reset_lora_optimizer_after_module_replay(
+        self,
+        optimizer: torch.optim.Optimizer,
+    ) -> torch.optim.Optimizer:
+        strategy = self.lora_optimizer_reset_strategy
+        if strategy == "keep" or self.module_manager.method == "lora":
+            return optimizer
+
+        self.module_manager.set_lora_phase()
+        if strategy == "reset_all":
+            named_params = self.module_manager.lora_named_parameters()
+            reset_params = self._count_unique_params(named_params)
+            self._lora_optimizer_reset_events += 1
+            self._lora_optimizer_reset_params += reset_params
+            print(
+                f"[loraplusMSeq] lora optimizer reset strategy=reset_all "
+                f"params={reset_params} event={self._lora_optimizer_reset_events}",
+                flush=True,
+            )
+            return self._create_optimizer(named_params, self.learning_rate)
+
+        named_params = self.module_manager.selected_lora_named_parameters()
+        reset_params = self._count_unique_params(named_params)
+        seen = set()
+        for _, param in named_params:
+            param_id = id(param)
+            if param_id in seen:
+                continue
+            seen.add(param_id)
+            optimizer.state.pop(param, None)
+        self._lora_optimizer_reset_events += 1
+        self._lora_optimizer_reset_params += reset_params
+        print(
+            f"[loraplusMSeq] lora optimizer reset strategy=reset_selected "
+            f"params={reset_params} event={self._lora_optimizer_reset_events}",
+            flush=True,
+        )
+        return optimizer
 
     def _record_lora_trainable_params(self) -> None:
         self._lora_trainable_params = self._count_unique_params(self.module_manager.lora_named_parameters())
@@ -294,6 +349,9 @@ class SequentialLoraPlusMTrainer:
             "module_updates": int(self.module_step),
             "total_model_params": int(self._count_total_model_params()),
             "total_candidate_module_params": int(self.module_manager.total_candidate_params),
+            "lora_optimizer_reset_strategy": self.lora_optimizer_reset_strategy,
+            "lora_optimizer_reset_events": int(self._lora_optimizer_reset_events),
+            "lora_optimizer_reset_params": int(self._lora_optimizer_reset_params),
         }
         with open(self._trainable_params_path, "w", encoding="utf-8") as f:
             json.dump(stats, f, ensure_ascii=False, indent=2)
@@ -417,12 +475,12 @@ class SequentialLoraPlusMTrainer:
         ]
         return torch.optim.AdamW(param_groups, lr=learning_rate)
 
-    def _get_module_optimizer(self) -> Optional[torch.optim.Optimizer]:
+    def _get_module_optimizer(self, force_recreate: bool = False) -> Optional[torch.optim.Optimizer]:
         named_params = self.module_manager.selected_module_named_parameters()
         if not named_params:
             return None
         key = tuple(name for name, _ in named_params)
-        if self._module_optimizer is None or key != self._module_optimizer_key:
+        if force_recreate or self._module_optimizer is None or key != self._module_optimizer_key:
             self._module_optimizer = self._create_optimizer(named_params, self.module_learning_rate)
             self._module_optimizer_key = key
         return self._module_optimizer

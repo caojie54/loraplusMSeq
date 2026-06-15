@@ -145,6 +145,22 @@ class CompensationModuleManager:
                 params.append((f"{candidate.name}.base_layer.bias", base_layer.bias))
         return params
 
+    def selected_lora_named_parameters(self) -> List[Tuple[str, nn.Parameter]]:
+        selected = set(self.selected_names)
+        params: List[Tuple[str, nn.Parameter]] = []
+        for candidate in self.candidates:
+            if candidate.name not in selected:
+                continue
+            lora_a = getattr(candidate.module, "lora_A", None)
+            lora_b = getattr(candidate.module, "lora_B", None)
+            if lora_a is not None:
+                for adapter_name, layer in lora_a.items():
+                    params.append((f"{candidate.name}.lora_A.{adapter_name}.weight", layer.weight))
+            if lora_b is not None:
+                for adapter_name, layer in lora_b.items():
+                    params.append((f"{candidate.name}.lora_B.{adapter_name}.weight", layer.weight))
+        return params
+
     def set_lora_phase(self) -> None:
         """Train only LoRA parameters while all original compensation weights are frozen."""
         for name, param in self.model.named_parameters():
@@ -201,16 +217,18 @@ class CompensationModuleManager:
         return self.record_selection([candidate.name for candidate in selected], step=step, reason=reason)
 
     def select_by_alpha_scores(self, scores: Dict[str, float], step: int) -> List[str]:
+        select_min = self.alpha_score == "lora_grad_norm_min"
+        missing_score = float("inf") if select_min else float("-inf")
         ranked = sorted(
             self.candidates,
-            key=lambda candidate: scores.get(candidate.name, float("-inf")),
-            reverse=True,
+            key=lambda candidate: scores.get(candidate.name, missing_score),
+            reverse=not select_min,
         )
         selected = self._choose_ranked_by_budget(ranked)
         return self.record_selection(
             [candidate.name for candidate in selected],
             step=step,
-            reason="seq_alpha",
+            reason="seq_alpha_min" if select_min else "seq_alpha",
             scores=scores,
         )
 
@@ -256,9 +274,10 @@ class CompensationModuleManager:
             "selected_param_ratio": float(selected_params / max(1, self.total_candidate_params)),
         }
         if scores is not None:
+            reverse_scores = self.alpha_score != "lora_grad_norm_min"
             record["scores"] = {
                 name: float(score)
-                for name, score in sorted(scores.items(), key=lambda item: item[1], reverse=True)[:50]
+                for name, score in sorted(scores.items(), key=lambda item: item[1], reverse=reverse_scores)[:50]
             }
         self.selection_records.append(record)
         self._append_history(record)
@@ -302,7 +321,7 @@ class CompensationModuleManager:
             if a_grad is None and b_grad is None:
                 continue
 
-            if self.alpha_score == "lora_grad_norm":
+            if self.alpha_score in {"lora_grad_norm", "lora_grad_norm_min"}:
                 a_term = torch.norm(a_grad.detach().float()).item() if a_grad is not None else 0.0
                 b_term = torch.norm(b_grad.detach().float()).item() if b_grad is not None else 0.0
                 denom = math.sqrt(max(1, a_weight.numel() + b_weight.numel()))
@@ -322,7 +341,7 @@ class CompensationModuleManager:
             else:
                 raise ValueError(f"Unsupported alpha_score: {self.alpha_score}")
 
-        if self.alpha_score == "lora_grad_norm":
+        if self.alpha_score in {"lora_grad_norm", "lora_grad_norm_min"}:
             return float(total)
         return float(total * math.log(max(2, base_num_params)))
 

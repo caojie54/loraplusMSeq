@@ -11,6 +11,20 @@ Methods:
 - `dynamic_random`: sequential baseline; sample a fresh random module set after every LoRA n-batch.
 - `lora`: LoRA-only baseline. The provided script runs `2` epochs for fair compute comparison with one sequential epoch.
 
+For `alpha` and `dynamic_random`, the module optimizer is recreated for each module replay block. For `static_random`, the fixed module set reuses the same module optimizer.
+
+Alpha score options:
+
+- `lora_grad_norm`: select modules with the largest accumulated LoRA gradient pressure.
+- `lora_grad_norm_min`: select modules with the smallest accumulated LoRA gradient pressure.
+- `lora_update_ratio`: select modules with the largest LoRA update-to-weight ratio pressure.
+
+LoRA optimizer state tags:
+
+- `loraopt-keep`: keep the LoRA optimizer state across all replay blocks.
+- `loraopt-reset-all`: reset the full LoRA optimizer state after each module replay block.
+- `loraopt-reset-selected`: reset only the LoRA optimizer state for the LoRA modules corresponding to the selected original modules.
+
 Run one single-GPU experiment:
 
 ```bash

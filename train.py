@@ -43,6 +43,8 @@ def build_output_dir(args) -> str:
         method_name += f"-interval{args.selection_interval}"
         if args.method == "alpha":
             method_name += f"-{args.alpha_score}"
+        if args.lora_optimizer_reset_strategy != "keep":
+            method_name += f"-loraopt{args.lora_optimizer_reset_strategy}"
     name = f"{model_name}-{method_name}-{targets}-rank{args.lora_rank}-{data_name}-epoch{args.num_train_epochs:g}"
     if args.seed != 0:
         name += f"-seed{args.seed}"
@@ -96,8 +98,15 @@ def parse_args():
         "--alpha_score",
         type=str,
         default="lora_grad_norm",
-        choices=["lora_update_ratio", "lora_grad_norm"],
+        choices=["lora_update_ratio", "lora_grad_norm", "lora_grad_norm_min"],
         help="Score accumulated from LoRA gradients during the LoRA phase.",
+    )
+    parser.add_argument(
+        "--lora_optimizer_reset_strategy",
+        type=str,
+        default="keep",
+        choices=["keep", "reset_all", "reset_selected"],
+        help="How to reset LoRA optimizer state after each module replay block.",
     )
     parser.add_argument("--logging_steps", type=int, default=10)
     parser.add_argument("--dataloader_num_workers", type=int, default=0)
@@ -157,6 +166,8 @@ def main():
         tokenize_text,
         batched=False,
         remove_columns=formatted_datasets["train"].column_names,
+        load_from_cache_file=False,
+        keep_in_memory=True,
     )
     print(f"Tokenized datasets: {tokenized_datasets}")
 
@@ -225,6 +236,7 @@ def main():
         bf16=args.bf16,
         max_grad_norm=args.max_grad_norm,
         dataloader_num_workers=args.dataloader_num_workers,
+        lora_optimizer_reset_strategy=args.lora_optimizer_reset_strategy,
     )
     trainer.train()
 

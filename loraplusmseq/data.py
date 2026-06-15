@@ -54,9 +54,9 @@ def get_formatted_datasets(data_path: str, prompt_only: bool):
         lambda example: format_text(example, data_name, prompt_only=prompt_only),
         batched=False,
         load_from_cache_file=False,
+        keep_in_memory=True,
     )
     print(f"Formatted datasets: {formatted_datasets}")
     print(f"Formatted example: {formatted_datasets[split_0][0]}")
     print(f"Text example:\n{formatted_datasets[split_0]['text'][0]}")
     return formatted_datasets
-
