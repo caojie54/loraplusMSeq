@@ -13,6 +13,8 @@ Methods:
 
 For `alpha` and `dynamic_random`, the module optimizer is recreated for each module replay block. For `static_random`, the fixed module set reuses the same module optimizer.
 
+Set `MODULE_OPTIMIZER_STATE_STRATEGY=persistent_offload` to keep one persistent module AdamW over all candidate original-module parameters. The selected modules' AdamW state is restored to the parameter device for module replay, then module state is offloaded to CPU; LoRA optimizer state is similarly restored for LoRA phases and offloaded before module phases.
+
 Alpha score options:
 
 - `lora_grad_norm`: select modules with the largest accumulated LoRA gradient pressure.

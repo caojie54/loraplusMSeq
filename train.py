@@ -45,6 +45,8 @@ def build_output_dir(args) -> str:
             method_name += f"-{args.alpha_score}"
         if args.lora_optimizer_reset_strategy != "keep":
             method_name += f"-loraopt{args.lora_optimizer_reset_strategy}"
+        if args.module_optimizer_state_strategy != "reset":
+            method_name += f"-moduleopt{args.module_optimizer_state_strategy}"
     name = f"{model_name}-{method_name}-{targets}-rank{args.lora_rank}-{data_name}-epoch{args.num_train_epochs:g}"
     if args.seed != 0:
         name += f"-seed{args.seed}"
@@ -107,6 +109,13 @@ def parse_args():
         default="keep",
         choices=["keep", "reset_all", "reset_selected"],
         help="How to reset LoRA optimizer state after each module replay block.",
+    )
+    parser.add_argument(
+        "--module_optimizer_state_strategy",
+        type=str,
+        default="reset",
+        choices=["reset", "persistent_offload"],
+        help="How to handle module AdamW state across module replay blocks.",
     )
     parser.add_argument("--logging_steps", type=int, default=10)
     parser.add_argument("--dataloader_num_workers", type=int, default=0)
@@ -237,6 +246,7 @@ def main():
         max_grad_norm=args.max_grad_norm,
         dataloader_num_workers=args.dataloader_num_workers,
         lora_optimizer_reset_strategy=args.lora_optimizer_reset_strategy,
+        module_optimizer_state_strategy=args.module_optimizer_state_strategy,
     )
     trainer.train()
 

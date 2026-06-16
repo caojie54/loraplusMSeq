@@ -45,6 +45,7 @@ class SequentialLoraPlusMTrainer:
         max_grad_norm: float = 1.0,
         dataloader_num_workers: int = 0,
         lora_optimizer_reset_strategy: str = "keep",
+        module_optimizer_state_strategy: str = "reset",
     ) -> None:
         self.model = model
         self.train_dataset = train_dataset
@@ -68,6 +69,9 @@ class SequentialLoraPlusMTrainer:
         self.lora_optimizer_reset_strategy = lora_optimizer_reset_strategy
         if self.lora_optimizer_reset_strategy not in {"keep", "reset_all", "reset_selected"}:
             raise ValueError(f"Unsupported lora_optimizer_reset_strategy: {self.lora_optimizer_reset_strategy}")
+        self.module_optimizer_state_strategy = module_optimizer_state_strategy
+        if self.module_optimizer_state_strategy not in {"reset", "persistent_offload"}:
+            raise ValueError(f"Unsupported module_optimizer_state_strategy: {self.module_optimizer_state_strategy}")
 
         self.global_step = 0
         self.lora_step = 0
@@ -84,6 +88,9 @@ class SequentialLoraPlusMTrainer:
         self._static_module_params_recorded = False
         self._lora_optimizer_reset_events = 0
         self._lora_optimizer_reset_params = 0
+        self._optimizer_state_offload_events = 0
+        self._optimizer_state_restore_events = 0
+        self._optimizer_state_tensors_moved = 0
 
     def train(self) -> Dict[str, object]:
         os.makedirs(self.output_dir, exist_ok=True)
@@ -95,6 +102,9 @@ class SequentialLoraPlusMTrainer:
         self._static_module_params_recorded = False
         self._lora_optimizer_reset_events = 0
         self._lora_optimizer_reset_params = 0
+        self._optimizer_state_offload_events = 0
+        self._optimizer_state_restore_events = 0
+        self._optimizer_state_tensors_moved = 0
 
         start = time.time()
         self.model.train()
@@ -127,6 +137,7 @@ class SequentialLoraPlusMTrainer:
                 self._maybe_log(losses, phase="lora")
 
                 if len(block) >= self.selection_interval:
+                    self._prepare_lora_optimizer_for_module_phase(lora_optimizer)
                     if self._run_module_replay_block(block, block_scores, losses, progress):
                         lora_optimizer = self._reset_lora_optimizer_after_module_replay(lora_optimizer)
                     block = []
@@ -135,6 +146,7 @@ class SequentialLoraPlusMTrainer:
             epoch_index += 1
 
         if block:
+            self._prepare_lora_optimizer_for_module_phase(lora_optimizer)
             if self._run_module_replay_block(block, block_scores, losses, progress):
                 lora_optimizer = self._reset_lora_optimizer_after_module_replay(lora_optimizer)
 
@@ -156,6 +168,10 @@ class SequentialLoraPlusMTrainer:
             "lora_optimizer_reset_strategy": self.lora_optimizer_reset_strategy,
             "lora_optimizer_reset_events": int(self._lora_optimizer_reset_events),
             "lora_optimizer_reset_params": int(self._lora_optimizer_reset_params),
+            "module_optimizer_state_strategy": self.module_optimizer_state_strategy,
+            "optimizer_state_offload_events": int(self._optimizer_state_offload_events),
+            "optimizer_state_restore_events": int(self._optimizer_state_restore_events),
+            "optimizer_state_tensors_moved": int(self._optimizer_state_tensors_moved),
         }
         with open(os.path.join(self.output_dir, "train_metrics.json"), "w", encoding="utf-8") as f:
             json.dump(metrics, f, ensure_ascii=False, indent=2)
@@ -197,6 +213,7 @@ class SequentialLoraPlusMTrainer:
         block_scores: Dict[str, float],
     ) -> float:
         self.module_manager.set_lora_phase()
+        self._prepare_lora_optimizer_for_lora_phase(optimizer)
         self._set_optimizer_lr(optimizer, self.learning_rate)
         optimizer.zero_grad(set_to_none=True)
 
@@ -224,10 +241,11 @@ class SequentialLoraPlusMTrainer:
         self.module_manager.set_module_phase()
         self._record_module_trainable_params(block)
         module_optimizer = self._get_module_optimizer(
-            force_recreate=self.module_manager.method in {"alpha", "dynamic_random"}
+            force_recreate=self._should_recreate_module_optimizer()
         )
         if module_optimizer is None:
             return False
+        self._prepare_module_optimizer_for_module_phase(module_optimizer)
 
         for update_batch in block:
             self._set_optimizer_lr(module_optimizer, self.module_learning_rate)
@@ -244,6 +262,7 @@ class SequentialLoraPlusMTrainer:
             progress.update(1)
             self._maybe_log(losses, phase="module")
 
+        self._prepare_module_optimizer_for_lora_phase(module_optimizer)
         self.module_manager.freeze_all_compensation()
         return True
 
@@ -285,6 +304,95 @@ class SequentialLoraPlusMTrainer:
             flush=True,
         )
         return optimizer
+
+    def _optimizer_state_offload_enabled(self) -> bool:
+        return self.module_optimizer_state_strategy == "persistent_offload" and self.module_manager.method != "lora"
+
+    def _should_recreate_module_optimizer(self) -> bool:
+        if self.module_optimizer_state_strategy == "persistent_offload":
+            return False
+        return self.module_manager.method in {"alpha", "dynamic_random"}
+
+    def _prepare_lora_optimizer_for_lora_phase(self, optimizer: torch.optim.Optimizer) -> None:
+        if not self._optimizer_state_offload_enabled():
+            return
+        self._move_optimizer_state_to_param_devices(
+            optimizer,
+            self.module_manager.lora_named_parameters(),
+            label="lora",
+        )
+
+    def _prepare_lora_optimizer_for_module_phase(self, optimizer: torch.optim.Optimizer) -> None:
+        if not self._optimizer_state_offload_enabled():
+            return
+        self._move_optimizer_state_to_cpu(optimizer, label="lora")
+
+    def _prepare_module_optimizer_for_module_phase(self, optimizer: torch.optim.Optimizer) -> None:
+        if not self._optimizer_state_offload_enabled():
+            return
+        self._move_optimizer_state_to_param_devices(
+            optimizer,
+            self.module_manager.selected_module_named_parameters(),
+            label="module",
+        )
+
+    def _prepare_module_optimizer_for_lora_phase(self, optimizer: torch.optim.Optimizer) -> None:
+        if not self._optimizer_state_offload_enabled():
+            return
+        self._move_optimizer_state_to_cpu(optimizer, label="module")
+
+    def _move_optimizer_state_to_cpu(self, optimizer: torch.optim.Optimizer, label: str) -> None:
+        moved = 0
+        for state in optimizer.state.values():
+            moved += self._move_state_tensors(state, torch.device("cpu"))
+        if moved:
+            self._optimizer_state_offload_events += 1
+            self._optimizer_state_tensors_moved += moved
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+            print(
+                f"[loraplusMSeq] optimizer state offload label={label} device=cpu tensors={moved} "
+                f"event={self._optimizer_state_offload_events}",
+                flush=True,
+            )
+
+    def _move_optimizer_state_to_param_devices(
+        self,
+        optimizer: torch.optim.Optimizer,
+        named_params: List[Tuple[str, torch.nn.Parameter]],
+        label: str,
+    ) -> None:
+        moved = 0
+        for _, param in named_params:
+            state = optimizer.state.get(param)
+            if not state:
+                continue
+            moved += self._move_state_tensors(state, param.device, keep_step_on_cpu=True)
+        if moved:
+            self._optimizer_state_restore_events += 1
+            self._optimizer_state_tensors_moved += moved
+            print(
+                f"[loraplusMSeq] optimizer state restore label={label} device=param tensors={moved} "
+                f"event={self._optimizer_state_restore_events}",
+                flush=True,
+            )
+
+    def _move_state_tensors(
+        self,
+        state: Dict[str, object],
+        device: torch.device,
+        keep_step_on_cpu: bool = False,
+    ) -> int:
+        moved = 0
+        for key, value in list(state.items()):
+            if not torch.is_tensor(value):
+                continue
+            target_device = torch.device("cpu") if keep_step_on_cpu and key == "step" else device
+            if value.device == target_device:
+                continue
+            state[key] = value.to(target_device, non_blocking=target_device.type == "cuda")
+            moved += 1
+        return moved
 
     def _record_lora_trainable_params(self) -> None:
         self._lora_trainable_params = self._count_unique_params(self.module_manager.lora_named_parameters())
@@ -352,6 +460,10 @@ class SequentialLoraPlusMTrainer:
             "lora_optimizer_reset_strategy": self.lora_optimizer_reset_strategy,
             "lora_optimizer_reset_events": int(self._lora_optimizer_reset_events),
             "lora_optimizer_reset_params": int(self._lora_optimizer_reset_params),
+            "module_optimizer_state_strategy": self.module_optimizer_state_strategy,
+            "optimizer_state_offload_events": int(self._optimizer_state_offload_events),
+            "optimizer_state_restore_events": int(self._optimizer_state_restore_events),
+            "optimizer_state_tensors_moved": int(self._optimizer_state_tensors_moved),
         }
         with open(self._trainable_params_path, "w", encoding="utf-8") as f:
             json.dump(stats, f, ensure_ascii=False, indent=2)
@@ -459,11 +571,12 @@ class SequentialLoraPlusMTrainer:
         self,
         named_params: List[Tuple[str, torch.nn.Parameter]],
         learning_rate: float,
+        include_frozen: bool = False,
     ) -> torch.optim.Optimizer:
         decay_params: List[torch.nn.Parameter] = []
         no_decay_params: List[torch.nn.Parameter] = []
         for name, param in named_params:
-            if not param.requires_grad:
+            if not include_frozen and not param.requires_grad:
                 continue
             if self._use_weight_decay(name):
                 decay_params.append(param)
@@ -476,12 +589,21 @@ class SequentialLoraPlusMTrainer:
         return torch.optim.AdamW(param_groups, lr=learning_rate)
 
     def _get_module_optimizer(self, force_recreate: bool = False) -> Optional[torch.optim.Optimizer]:
-        named_params = self.module_manager.selected_module_named_parameters()
+        persistent = self.module_optimizer_state_strategy == "persistent_offload"
+        named_params = (
+            self.module_manager.module_named_parameters()
+            if persistent
+            else self.module_manager.selected_module_named_parameters()
+        )
         if not named_params:
             return None
         key = tuple(name for name, _ in named_params)
         if force_recreate or self._module_optimizer is None or key != self._module_optimizer_key:
-            self._module_optimizer = self._create_optimizer(named_params, self.module_learning_rate)
+            self._module_optimizer = self._create_optimizer(
+                named_params,
+                self.module_learning_rate,
+                include_frozen=persistent,
+            )
             self._module_optimizer_key = key
         return self._module_optimizer
 

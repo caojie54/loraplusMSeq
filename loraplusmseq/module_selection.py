@@ -145,6 +145,15 @@ class CompensationModuleManager:
                 params.append((f"{candidate.name}.base_layer.bias", base_layer.bias))
         return params
 
+    def module_named_parameters(self) -> List[Tuple[str, nn.Parameter]]:
+        params: List[Tuple[str, nn.Parameter]] = []
+        for candidate in self.candidates:
+            base_layer = candidate.module.base_layer
+            params.append((f"{candidate.name}.base_layer.weight", base_layer.weight))
+            if getattr(base_layer, "bias", None) is not None:
+                params.append((f"{candidate.name}.base_layer.bias", base_layer.bias))
+        return params
+
     def selected_lora_named_parameters(self) -> List[Tuple[str, nn.Parameter]]:
         selected = set(self.selected_names)
         params: List[Tuple[str, nn.Parameter]] = []

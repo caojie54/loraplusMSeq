@@ -18,6 +18,7 @@ COMP_RATIO=${COMP_RATIO:-0.005}
 SELECTION_INTERVAL=${SELECTION_INTERVAL:-50}
 ALPHA_SCORE=${ALPHA_SCORE:-lora_grad_norm}
 LORA_OPTIMIZER_RESET_STRATEGY=${LORA_OPTIMIZER_RESET_STRATEGY:-keep}
+MODULE_OPTIMIZER_STATE_STRATEGY=${MODULE_OPTIMIZER_STATE_STRATEGY:-reset}
 if [[ "${METHOD}" == "lora" ]]; then
   NUM_TRAIN_EPOCHS=${NUM_TRAIN_EPOCHS:-2}
   SAVE_MERGED_MODEL=${SAVE_MERGED_MODEL:-false}
@@ -55,6 +56,7 @@ python train.py \
   --compensation_ratio="${COMP_RATIO}" \
   --alpha_score="${ALPHA_SCORE}" \
   --lora_optimizer_reset_strategy="${LORA_OPTIMIZER_RESET_STRATEGY}" \
+  --module_optimizer_state_strategy="${MODULE_OPTIMIZER_STATE_STRATEGY}" \
   --save_merged_model="${SAVE_MERGED_MODEL}" \
   --output_dir="${OUTPUT_ROOT}" \
   --run_name="${RUN_NAME}"
