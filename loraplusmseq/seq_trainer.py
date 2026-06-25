@@ -553,8 +553,8 @@ class SequentialLoraPlusMTrainer:
         return total_loss / max(1, len(update_batch))
 
     def _autocast_context(self):
-        if not torch.cuda.is_available():
-            return torch.autocast(device_type="cpu", enabled=False)
+        # if not torch.cuda.is_available():
+        #     return torch.autocast(device_type="cpu", enabled=False)
         return torch.autocast(device_type="cuda", dtype=torch.bfloat16, enabled=self.bf16)
 
     def _move_to_device(self, batch: Batch) -> Batch:
