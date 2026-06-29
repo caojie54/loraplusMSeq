@@ -70,7 +70,7 @@ class SequentialLoraPlusMTrainer:
         if self.lora_optimizer_reset_strategy not in {"keep", "reset_all", "reset_selected"}:
             raise ValueError(f"Unsupported lora_optimizer_reset_strategy: {self.lora_optimizer_reset_strategy}")
         self.module_optimizer_state_strategy = module_optimizer_state_strategy
-        if self.module_optimizer_state_strategy not in {"reset", "persistent_offload"}:
+        if self.module_optimizer_state_strategy not in {"reset", "reset_offload", "persistent_offload"}:
             raise ValueError(f"Unsupported module_optimizer_state_strategy: {self.module_optimizer_state_strategy}")
 
         self.global_step = 0
@@ -306,7 +306,7 @@ class SequentialLoraPlusMTrainer:
         return optimizer
 
     def _optimizer_state_offload_enabled(self) -> bool:
-        return self.module_optimizer_state_strategy == "persistent_offload" and self.module_manager.method != "lora"
+        return self.module_optimizer_state_strategy in {"reset_offload", "persistent_offload"} and self.module_manager.method != "lora"
 
     def _should_recreate_module_optimizer(self) -> bool:
         if self.module_optimizer_state_strategy == "persistent_offload":
@@ -423,7 +423,11 @@ class SequentialLoraPlusMTrainer:
             "selected_names": list(self.module_manager.selected_names),
             "module_trainable_params": int(module_trainable_params),
             "current_trainable_params": int(current_trainable),
-            "selected_param_ratio": float(module_trainable_params / max(1, self.module_manager.total_candidate_params)),
+            "selected_param_ratio": float(module_trainable_params / max(1, self.module_manager.total_model_params)),
+            "selected_candidate_param_ratio": float(
+                module_trainable_params / max(1, self.module_manager.total_candidate_params)
+            ),
+            "ratio_denominator": "total_model_params",
         }
         self._module_param_records.append(record)
         if method == "static_random":
@@ -453,10 +457,21 @@ class SequentialLoraPlusMTrainer:
             "module_average_trainable_params": module_average,
             "phase_average_trainable_params": phase_average,
             "overall_average_trainable_params": float(overall_average),
+            "module_average_trainable_ratio": (
+                None if module_average is None else float(module_average / max(1, self.module_manager.total_model_params))
+            ),
+            "module_average_candidate_trainable_ratio": (
+                None
+                if module_average is None
+                else float(module_average / max(1, self.module_manager.total_candidate_params))
+            ),
+            "phase_average_trainable_ratio": float(phase_average / max(1, self.module_manager.total_model_params)),
+            "overall_average_trainable_ratio": float(overall_average / max(1, self.module_manager.total_model_params)),
             "lora_updates": int(self.lora_step),
             "module_updates": int(self.module_step),
-            "total_model_params": int(self._count_total_model_params()),
+            "total_model_params": int(self.module_manager.total_model_params),
             "total_candidate_module_params": int(self.module_manager.total_candidate_params),
+            "ratio_denominator": "total_model_params",
             "lora_optimizer_reset_strategy": self.lora_optimizer_reset_strategy,
             "lora_optimizer_reset_events": int(self._lora_optimizer_reset_events),
             "lora_optimizer_reset_params": int(self._lora_optimizer_reset_params),

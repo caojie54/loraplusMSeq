@@ -77,6 +77,7 @@ class CompensationModuleManager:
         target_modules: Sequence[str],
         method: str,
         param_ratio: float = 0.005,
+        total_model_params: Optional[int] = None,
         seed: int = 0,
         alpha_score: str = "lora_update_ratio",
         history_path: Optional[str] = None,
@@ -95,6 +96,9 @@ class CompensationModuleManager:
         self.selection_step = -1
         self.selection_records: List[Dict[str, object]] = []
         self.total_candidate_params = sum(candidate.num_params for candidate in self.candidates)
+        self.total_model_params = (
+            int(total_model_params) if total_model_params is not None else self._count_original_model_params()
+        )
         if self.enabled and (not math.isfinite(self.param_ratio) or self.param_ratio <= 0):
             raise ValueError("compensation_ratio must be a positive finite value when module replay is enabled.")
         self._register_managed_params()
@@ -111,6 +115,12 @@ class CompensationModuleManager:
             if getattr(base_layer, "bias", None) is not None:
                 self.managed_param_ids.add(id(base_layer.bias))
 
+    def _count_original_model_params(self) -> int:
+        total = int(sum(param.numel() for name, param in self.model.named_parameters() if "lora_" not in name))
+        if total > 0:
+            return total
+        return int(sum(param.numel() for param in self.model.parameters()))
+
     def save_candidates(self, path: str) -> None:
         os.makedirs(os.path.dirname(path), exist_ok=True)
         with open(path, "w", encoding="utf-8") as f:
@@ -119,6 +129,8 @@ class CompensationModuleManager:
                     "target_modules": self.target_modules,
                     "method": self.method,
                     "param_ratio": self.param_ratio,
+                    "ratio_denominator": "total_model_params",
+                    "total_model_params": self.total_model_params,
                     "total_candidate_params": self.total_candidate_params,
                     "candidates": [candidate.to_json() for candidate in self.candidates],
                 },
@@ -255,7 +267,7 @@ class CompensationModuleManager:
         if not math.isfinite(self.param_ratio) or self.param_ratio <= 0:
             raise ValueError("compensation_ratio must be a positive finite value.")
 
-        budget = max(1, int(self.total_candidate_params * self.param_ratio))
+        budget = max(1, int(self.total_model_params * self.param_ratio))
         selected: List[CandidateModule] = []
         used = 0
         for candidate in ranked_candidates:
@@ -280,7 +292,9 @@ class CompensationModuleManager:
             "selected_names": list(self.selected_names),
             "selected_short_names": [self.candidate_by_name[name].short_name for name in self.selected_names],
             "selected_params": int(selected_params),
-            "selected_param_ratio": float(selected_params / max(1, self.total_candidate_params)),
+            "selected_param_ratio": float(selected_params / max(1, self.total_model_params)),
+            "selected_candidate_param_ratio": float(selected_params / max(1, self.total_candidate_params)),
+            "ratio_denominator": "total_model_params",
         }
         if scores is not None:
             reverse_scores = self.alpha_score != "lora_grad_norm_min"

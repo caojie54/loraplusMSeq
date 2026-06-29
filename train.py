@@ -94,7 +94,7 @@ def parse_args():
         "--compensation_ratio",
         type=float,
         default=0.005,
-        help="Fraction of candidate original-module parameters to train in each module replay block.",
+        help="Fraction of original model parameters to train in each module replay block.",
     )
     parser.add_argument(
         "--alpha_score",
@@ -114,7 +114,7 @@ def parse_args():
         "--module_optimizer_state_strategy",
         type=str,
         default="reset",
-        choices=["reset", "persistent_offload"],
+        choices=["reset", "reset_offload", "persistent_offload"],
         help="How to handle module AdamW state across module replay blocks.",
     )
     parser.add_argument("--logging_steps", type=int, default=10)
@@ -216,6 +216,7 @@ def main():
         target_modules=args.target_modules,
         method=args.method,
         param_ratio=args.compensation_ratio,
+        total_model_params=sum(param.numel() for name, param in model.named_parameters() if "lora_" not in name),
         seed=args.seed,
         alpha_score=args.alpha_score,
         history_path=history_path,
