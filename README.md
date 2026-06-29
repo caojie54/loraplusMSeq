@@ -1,46 +1,76 @@
 # loraplusMSeq
 
-Sequential LoRA plus compensation-module training for `commonsense170k`.
+Sequential LoRA plus selected compensation-module training. The project supports `commonsense170k` and NaturalReasoning scripts.
 
-For each n-batch, the trainer first updates LoRA only and accumulates module-wise LoRA gradient pressure. It then selects compensation modules and replays the exact same cached n-batch with LoRA frozen and only the selected original module weights trainable.
+For each n-batch, the trainer first updates LoRA parameters. It then selects original base modules and replays the same cached n-batch with LoRA frozen and only the selected original module weights trainable.
 
-Methods:
+## Selection methods
 
-- `alpha`: sequential LoRA phase, select modules by accumulated LoRA gradient pressure, then module replay.
-- `static_random`: sequential baseline; after the first LoRA n-batch, sample one fixed random module set and reuse it for all module replay phases.
-- `dynamic_random`: sequential baseline; sample a fresh random module set after every LoRA n-batch.
-- `lora`: LoRA-only baseline. The provided script runs `2` epochs for fair compute comparison with one sequential epoch.
+- `alpha`: select modules by accumulated LoRA gradient pressure. Use `--alpha_score lora_grad_norm`, `lora_grad_norm_min`, or `lora_update_ratio`.
+- `static_random`: sample one fixed random module set and reuse it for all module replay phases.
+- `dynamic_random`: sample a fresh random module set after every LoRA n-batch.
+- `lora`: LoRA-only baseline; module replay is skipped.
 
-For `alpha` and `dynamic_random`, the module optimizer is recreated for each module replay block. For `static_random`, the fixed module set reuses the same module optimizer.
+`--compensation_ratio` is interpreted against total original model parameters, not total candidate-module parameters. The run metadata still records `selected_candidate_param_ratio` for comparison.
 
-Set `MODULE_OPTIMIZER_STATE_STRATEGY=persistent_offload` to keep one persistent module AdamW over all candidate original-module parameters. The selected modules' AdamW state is restored to the parameter device for module replay, then module state is offloaded to CPU; LoRA optimizer state is similarly restored for LoRA phases and offloaded before module phases.
+## Optimizer state
 
-Alpha score options:
+`--module_optimizer_state_strategy` supports:
 
-- `lora_grad_norm`: select modules with the largest accumulated LoRA gradient pressure.
-- `lora_grad_norm_min`: select modules with the smallest accumulated LoRA gradient pressure.
-- `lora_update_ratio`: select modules with the largest LoRA update-to-weight ratio pressure.
+- `reset_offload` (default): recreate the module optimizer every module replay block and release/offload module optimizer state before returning to LoRA.
+- `persistent_offload`: keep one persistent module optimizer over all candidate original modules. Optimizer state is restored for module replay and offloaded around LoRA phases.
 
-LoRA optimizer state tags:
+LoRA optimizer reset controls are unchanged:
 
-- `loraopt-keep`: keep the LoRA optimizer state across all replay blocks.
-- `loraopt-reset-all`: reset the full LoRA optimizer state after each module replay block.
-- `loraopt-reset-selected`: reset only the LoRA optimizer state for the LoRA modules corresponding to the selected original modules.
+- `--lora_optimizer_reset_strategy keep`
+- `--lora_optimizer_reset_strategy reset_all`
+- `--lora_optimizer_reset_strategy reset_selected`
 
-Run one single-GPU experiment:
+## Optimizer update dtype
+
+Both phases can update either the low-precision model parameters directly or fp32 shadow parameters:
+
+- `--lora_optimizer_dtype bf16|fp32` (default `bf16`)
+- `--module_optimizer_dtype bf16|fp32` (default `bf16`)
+
+`fp32` uses `Fp32ShadowAdamW`: gradients are copied to fp32 shadow parameters, AdamW updates the fp32 shadows, then updated values are copied back to the model parameter dtype.
+
+## Module gradient mode
+
+`--module_gradient_mode full|residual` controls module replay gradients.
+
+- `full` (default): use the full selected base-module gradient.
+- `residual`: project selected base weight gradients into the residual subspace orthogonal to the current LoRA update bases, following the implementation in `loraplusMSeqRe`. Tune numerical rank with `--residual_rtol`.
+
+## Entry points
+
+Commonsense:
 
 ```bash
 cd /mnt/petrelfs/caojie1/projects/loraplusMSeq
-srun -p sciverse_agent --job-name=test_df --ntasks-per-node=1 --cpus-per-task=24 --gres=gpu:1 bash task.sh
+srun -p sciverse_agent --job-name=mseq_debug --ntasks-per-node=1 --cpus-per-task=24 --gres=gpu:1 bash task.sh
 ```
 
-Run all four requested jobs sequentially:
+NaturalReasoning 20k:
 
 ```bash
 cd /mnt/petrelfs/caojie1/projects/loraplusMSeq
-srun -p sciverse_agent --job-name=test_df --ntasks-per-node=1 --cpus-per-task=24 --gres=gpu:1 bash exps/commonsense170k/run_all.sh
+srun -p sciverse_agent --job-name=nr20k_mseq --ntasks-per-node=1 --cpus-per-task=24 --gres=gpu:1 bash task_natural_reasoning.sh
 ```
 
-Outputs are written under `/mnt/dhwfile/raise/user/caojie/loraplusMSeq/outputs/commonsense170k` by default.
+NaturalReasoning task defaults:
 
-After training, each run also writes `trainable_params.json` in the run output directory. It records the LoRA trainable parameter count once, module trainable parameter counts by replay block for `alpha` and `dynamic_random`, a single reused module count for `static_random`, plus module-phase, phase-average, and whole-training average trainable parameter counts. The key averages are also copied into `train_metrics.json`.
+- train data: `/mnt/petrelfs/caojie1/projects/CoMoL/datasets/natural_reasoning_20k`
+- eval data: `/mnt/petrelfs/caojie1/projects/CoMoL/datasets/natural_reasoning_eval`
+- eval benchmarks: `gpqa_diamond math_500 mmlu_pro_500`
+- test generation: `max_new_tokens=1536`, `batch_size=64`
+
+## Outputs
+
+Runs write under `/mnt/dhwfile/raise/user/caojie/loraplusMSeq/outputs` by default. Each run records:
+
+- `candidate_modules.json`: candidate modules, total model parameter denominator, and candidate parameter totals.
+- `selection_history.jsonl`: selected modules and selected ratios per block.
+- `trainable_params.json`: LoRA/module trainable parameter stats, optimizer strategy, optimizer dtype, gradient mode, and ratio denominator.
+- `train_metrics.json`: training loss/runtime and the same key optimizer/state metadata.
+- `predictions/` and `natural_reasoning_acc_score.jsonl` for NaturalReasoning runs when evaluation is enabled.

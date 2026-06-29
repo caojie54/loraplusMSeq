@@ -45,8 +45,14 @@ def build_output_dir(args) -> str:
             method_name += f"-{args.alpha_score}"
         if args.lora_optimizer_reset_strategy != "keep":
             method_name += f"-loraopt{args.lora_optimizer_reset_strategy}"
-        if args.module_optimizer_state_strategy != "reset":
+        if args.module_optimizer_state_strategy != "reset_offload":
             method_name += f"-moduleopt{args.module_optimizer_state_strategy}"
+        if args.lora_optimizer_dtype != "bf16":
+            method_name += f"-loraopt{args.lora_optimizer_dtype}"
+        if args.module_optimizer_dtype != "bf16":
+            method_name += f"-moduleoptdtype{args.module_optimizer_dtype}"
+        if args.module_gradient_mode != "full":
+            method_name += f"-modulegrad{args.module_gradient_mode}"
     name = f"{model_name}-{method_name}-{targets}-rank{args.lora_rank}-{data_name}-epoch{args.num_train_epochs:g}"
     if args.seed != 0:
         name += f"-seed{args.seed}"
@@ -113,10 +119,32 @@ def parse_args():
     parser.add_argument(
         "--module_optimizer_state_strategy",
         type=str,
-        default="reset",
-        choices=["reset", "reset_offload", "persistent_offload"],
-        help="How to handle module AdamW state across module replay blocks.",
+        default="reset_offload",
+        choices=["reset_offload", "persistent_offload"],
+        help="How to handle module AdamW state across module replay blocks. reset_offload recreates the module optimizer each block and frees/offloads it before returning to LoRA.",
     )
+    parser.add_argument(
+        "--lora_optimizer_dtype",
+        type=str,
+        default="bf16",
+        choices=["bf16", "fp32"],
+        help="Use normal low-precision AdamW or fp32 shadow AdamW for LoRA updates.",
+    )
+    parser.add_argument(
+        "--module_optimizer_dtype",
+        type=str,
+        default="bf16",
+        choices=["bf16", "fp32"],
+        help="Use normal low-precision AdamW or fp32 shadow AdamW for module replay updates.",
+    )
+    parser.add_argument(
+        "--module_gradient_mode",
+        type=str,
+        default="full",
+        choices=["full", "residual"],
+        help="Use full selected-module gradients or project them to the LoRA residual subspace.",
+    )
+    parser.add_argument("--residual_rtol", type=float, default=1e-4)
     parser.add_argument("--logging_steps", type=int, default=10)
     parser.add_argument("--dataloader_num_workers", type=int, default=0)
     parser.add_argument("--max_train_samples", type=int, default=0)
@@ -248,6 +276,10 @@ def main():
         dataloader_num_workers=args.dataloader_num_workers,
         lora_optimizer_reset_strategy=args.lora_optimizer_reset_strategy,
         module_optimizer_state_strategy=args.module_optimizer_state_strategy,
+        lora_optimizer_dtype=args.lora_optimizer_dtype,
+        module_optimizer_dtype=args.module_optimizer_dtype,
+        module_gradient_mode=args.module_gradient_mode,
+        residual_rtol=args.residual_rtol,
     )
     trainer.train()
 

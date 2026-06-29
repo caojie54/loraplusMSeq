@@ -25,7 +25,11 @@ COMP_RATIO=${COMP_RATIO:-0.02}
 SELECTION_INTERVAL=${SELECTION_INTERVAL:-625}
 ALPHA_SCORE=${ALPHA_SCORE:-lora_grad_norm}
 LORA_OPTIMIZER_RESET_STRATEGY=${LORA_OPTIMIZER_RESET_STRATEGY:-keep}
-MODULE_OPTIMIZER_STATE_STRATEGY=${MODULE_OPTIMIZER_STATE_STRATEGY:-reset}
+LORA_OPTIMIZER_DTYPE=${LORA_OPTIMIZER_DTYPE:-bf16}
+MODULE_OPTIMIZER_DTYPE=${MODULE_OPTIMIZER_DTYPE:-bf16}
+MODULE_GRADIENT_MODE=${MODULE_GRADIENT_MODE:-full}
+RESIDUAL_RTOL=${RESIDUAL_RTOL:-1e-4}
+MODULE_OPTIMIZER_STATE_STRATEGY=${MODULE_OPTIMIZER_STATE_STRATEGY:-reset_offload}
 
 if [[ "${METHOD}" == "lora" ]]; then
   NUM_TRAIN_EPOCHS=${NUM_TRAIN_EPOCHS:-1}
@@ -45,8 +49,17 @@ if [[ "${METHOD}" == "alpha" ]]; then
     METHOD_DESC="${METHOD_DESC}-${ALPHA_SCORE}"
   fi
 fi
-if [[ "${MODULE_OPTIMIZER_STATE_STRATEGY}" != "reset" ]]; then
+if [[ "${MODULE_OPTIMIZER_STATE_STRATEGY}" != "reset_offload" ]]; then
   METHOD_DESC="${METHOD_DESC}-moduleopt-${MODULE_OPTIMIZER_STATE_STRATEGY}"
+fi
+if [[ "${LORA_OPTIMIZER_DTYPE}" != "bf16" ]]; then
+  METHOD_DESC="${METHOD_DESC}-loraopt-${LORA_OPTIMIZER_DTYPE}"
+fi
+if [[ "${MODULE_OPTIMIZER_DTYPE}" != "bf16" ]]; then
+  METHOD_DESC="${METHOD_DESC}-moduleoptdtype-${MODULE_OPTIMIZER_DTYPE}"
+fi
+if [[ "${MODULE_GRADIENT_MODE}" != "full" ]]; then
+  METHOD_DESC="${METHOD_DESC}-modulegrad-${MODULE_GRADIENT_MODE}"
 fi
 
 RUN_NAME=${RUN_NAME:-llama-3-1-8b-seq-${METHOD_DESC}-qkvogateupdown-rank${RANK}-natural-reasoning-20k-epoch${NUM_TRAIN_EPOCHS}-ratio${COMP_RATIO}-block${SELECTION_INTERVAL}-loralr${LORA_LR}-modulelr${MODULE_LR}}
@@ -115,6 +128,10 @@ python train.py \
   --alpha_score="${ALPHA_SCORE}" \
   --lora_optimizer_reset_strategy="${LORA_OPTIMIZER_RESET_STRATEGY}" \
   --module_optimizer_state_strategy="${MODULE_OPTIMIZER_STATE_STRATEGY}" \
+  --lora_optimizer_dtype="${LORA_OPTIMIZER_DTYPE}" \
+  --module_optimizer_dtype="${MODULE_OPTIMIZER_DTYPE}" \
+  --module_gradient_mode="${MODULE_GRADIENT_MODE}" \
+  --residual_rtol="${RESIDUAL_RTOL}" \
   --gradient_checkpointing="${GRADIENT_CHECKPOINTING}" \
   --save_merged_model="${SAVE_MERGED_MODEL}" \
   --output_dir="${OUTPUT_ROOT}" \

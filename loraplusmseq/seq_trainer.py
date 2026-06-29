@@ -13,7 +13,9 @@ import torch
 from torch.utils.data import DataLoader
 from tqdm.auto import tqdm
 
+from .fp32_shadow_optimizer import Fp32ShadowAdamW
 from .module_selection import CompensationModuleManager
+from .residual_gradient import attach_residual_grad_hooks, remove_hooks
 
 
 Batch = Dict[str, torch.Tensor]
@@ -45,7 +47,11 @@ class SequentialLoraPlusMTrainer:
         max_grad_norm: float = 1.0,
         dataloader_num_workers: int = 0,
         lora_optimizer_reset_strategy: str = "keep",
-        module_optimizer_state_strategy: str = "reset",
+        module_optimizer_state_strategy: str = "reset_offload",
+        lora_optimizer_dtype: str = "bf16",
+        module_optimizer_dtype: str = "bf16",
+        module_gradient_mode: str = "full",
+        residual_rtol: float = 1e-4,
     ) -> None:
         self.model = model
         self.train_dataset = train_dataset
@@ -70,8 +76,18 @@ class SequentialLoraPlusMTrainer:
         if self.lora_optimizer_reset_strategy not in {"keep", "reset_all", "reset_selected"}:
             raise ValueError(f"Unsupported lora_optimizer_reset_strategy: {self.lora_optimizer_reset_strategy}")
         self.module_optimizer_state_strategy = module_optimizer_state_strategy
-        if self.module_optimizer_state_strategy not in {"reset", "reset_offload", "persistent_offload"}:
+        if self.module_optimizer_state_strategy not in {"reset_offload", "persistent_offload"}:
             raise ValueError(f"Unsupported module_optimizer_state_strategy: {self.module_optimizer_state_strategy}")
+        self.lora_optimizer_dtype = lora_optimizer_dtype
+        self.module_optimizer_dtype = module_optimizer_dtype
+        if self.lora_optimizer_dtype not in {"bf16", "fp32"}:
+            raise ValueError(f"Unsupported lora_optimizer_dtype: {self.lora_optimizer_dtype}")
+        if self.module_optimizer_dtype not in {"bf16", "fp32"}:
+            raise ValueError(f"Unsupported module_optimizer_dtype: {self.module_optimizer_dtype}")
+        if module_gradient_mode not in {"full", "residual"}:
+            raise ValueError(f"Unsupported module_gradient_mode: {module_gradient_mode}")
+        self.module_gradient_mode = module_gradient_mode
+        self.residual_rtol = float(residual_rtol)
 
         self.global_step = 0
         self.lora_step = 0
@@ -111,7 +127,11 @@ class SequentialLoraPlusMTrainer:
         self.module_manager.set_lora_phase()
         self._record_lora_trainable_params()
 
-        lora_optimizer = self._create_optimizer(self.module_manager.lora_named_parameters(), self.learning_rate)
+        lora_optimizer = self._create_optimizer(
+            self.module_manager.lora_named_parameters(),
+            self.learning_rate,
+            optimizer_dtype=self.lora_optimizer_dtype,
+        )
         self.total_lora_updates = self._planned_lora_updates()
         replay_multiplier = 1 if self.module_manager.method == "lora" else 2
         self.total_updates = self.total_lora_updates * replay_multiplier
@@ -169,6 +189,10 @@ class SequentialLoraPlusMTrainer:
             "lora_optimizer_reset_events": int(self._lora_optimizer_reset_events),
             "lora_optimizer_reset_params": int(self._lora_optimizer_reset_params),
             "module_optimizer_state_strategy": self.module_optimizer_state_strategy,
+            "module_optimizer_reset_each_block": self.module_optimizer_state_strategy == "reset_offload",
+            "lora_optimizer_update_dtype": self.lora_optimizer_dtype,
+            "module_optimizer_update_dtype": self.module_optimizer_dtype,
+            "module_gradient_mode": self.module_gradient_mode,
             "optimizer_state_offload_events": int(self._optimizer_state_offload_events),
             "optimizer_state_restore_events": int(self._optimizer_state_restore_events),
             "optimizer_state_tensors_moved": int(self._optimizer_state_tensors_moved),
@@ -222,8 +246,14 @@ class SequentialLoraPlusMTrainer:
         for name, score in self.module_manager.score_from_lora_grads().items():
             block_scores[name] += score
 
-        self._clip_gradients([param for _, param in self.module_manager.lora_named_parameters()])
-        optimizer.step()
+        lora_named_params = self.module_manager.lora_named_parameters()
+        if isinstance(optimizer, Fp32ShadowAdamW):
+            optimizer.sync_lp_grads_to_hp(clear_lp_grads=True)
+            self._clip_gradients(optimizer.hp_parameters_for_lp(lora_named_params))
+            optimizer.step(sync_grads=False)
+        else:
+            self._clip_gradients([param for _, param in lora_named_params])
+            optimizer.step()
         optimizer.zero_grad(set_to_none=True)
         return loss_value
 
@@ -244,26 +274,38 @@ class SequentialLoraPlusMTrainer:
             force_recreate=self._should_recreate_module_optimizer()
         )
         if module_optimizer is None:
+            self.module_manager.freeze_all_compensation()
             return False
-        self._prepare_module_optimizer_for_module_phase(module_optimizer)
 
-        for update_batch in block:
-            self._set_optimizer_lr(module_optimizer, self.module_learning_rate)
-            module_optimizer.zero_grad(set_to_none=True)
-            module_loss = self._backward_update_batch(update_batch)
-            module_params = [param for _, param in self.module_manager.selected_module_named_parameters()]
-            self._clip_gradients(module_params)
-            module_optimizer.step()
-            module_optimizer.zero_grad(set_to_none=True)
+        hook_handles = []
+        try:
+            hook_handles = self._attach_module_gradient_hooks()
+            self._prepare_module_optimizer_for_module_phase(module_optimizer)
+            for update_batch in block:
+                self._set_optimizer_lr(module_optimizer, self.module_learning_rate)
+                module_optimizer.zero_grad(set_to_none=True)
+                module_loss = self._backward_update_batch(update_batch)
+                module_named_params = self.module_manager.selected_module_named_parameters()
+                if isinstance(module_optimizer, Fp32ShadowAdamW):
+                    module_optimizer.sync_lp_grads_to_hp(clear_lp_grads=True)
+                    self._clip_gradients(module_optimizer.hp_parameters_for_lp(module_named_params))
+                    module_optimizer.step(sync_grads=False)
+                else:
+                    self._clip_gradients([param for _, param in module_named_params])
+                    module_optimizer.step()
+                module_optimizer.zero_grad(set_to_none=True)
 
-            losses["module"].append(module_loss)
-            self.module_step += 1
-            self.global_step += 1
-            progress.update(1)
-            self._maybe_log(losses, phase="module")
-
-        self._prepare_module_optimizer_for_lora_phase(module_optimizer)
-        self.module_manager.freeze_all_compensation()
+                losses["module"].append(module_loss)
+                self.module_step += 1
+                self.global_step += 1
+                progress.update(1)
+                self._maybe_log(losses, phase="module")
+        finally:
+            remove_hooks(hook_handles)
+            self._prepare_module_optimizer_for_lora_phase(module_optimizer)
+            self.module_manager.freeze_all_compensation()
+            if self.module_optimizer_state_strategy == "reset_offload":
+                self._discard_module_optimizer()
         return True
 
     def _reset_lora_optimizer_after_module_replay(
@@ -285,17 +327,24 @@ class SequentialLoraPlusMTrainer:
                 f"params={reset_params} event={self._lora_optimizer_reset_events}",
                 flush=True,
             )
-            return self._create_optimizer(named_params, self.learning_rate)
+            return self._create_optimizer(
+                named_params,
+                self.learning_rate,
+                optimizer_dtype=self.lora_optimizer_dtype,
+            )
 
         named_params = self.module_manager.selected_lora_named_parameters()
         reset_params = self._count_unique_params(named_params)
-        seen = set()
-        for _, param in named_params:
-            param_id = id(param)
-            if param_id in seen:
-                continue
-            seen.add(param_id)
-            optimizer.state.pop(param, None)
+        if isinstance(optimizer, Fp32ShadowAdamW):
+            optimizer.reset_lp_states(named_params)
+        else:
+            seen = set()
+            for _, param in named_params:
+                param_id = id(param)
+                if param_id in seen:
+                    continue
+                seen.add(param_id)
+                optimizer.state.pop(param, None)
         self._lora_optimizer_reset_events += 1
         self._lora_optimizer_reset_params += reset_params
         print(
@@ -309,16 +358,16 @@ class SequentialLoraPlusMTrainer:
         return self.module_optimizer_state_strategy in {"reset_offload", "persistent_offload"} and self.module_manager.method != "lora"
 
     def _should_recreate_module_optimizer(self) -> bool:
-        if self.module_optimizer_state_strategy == "persistent_offload":
-            return False
-        return self.module_manager.method in {"alpha", "dynamic_random"}
+        return self.module_optimizer_state_strategy == "reset_offload"
 
     def _prepare_lora_optimizer_for_lora_phase(self, optimizer: torch.optim.Optimizer) -> None:
         if not self._optimizer_state_offload_enabled():
             return
+        named_params = self.module_manager.lora_named_parameters()
+        self._restore_shadow_params(optimizer, named_params, label="lora")
         self._move_optimizer_state_to_param_devices(
             optimizer,
-            self.module_manager.lora_named_parameters(),
+            named_params,
             label="lora",
         )
 
@@ -326,13 +375,16 @@ class SequentialLoraPlusMTrainer:
         if not self._optimizer_state_offload_enabled():
             return
         self._move_optimizer_state_to_cpu(optimizer, label="lora")
+        self._offload_shadow_params(optimizer, label="lora")
 
     def _prepare_module_optimizer_for_module_phase(self, optimizer: torch.optim.Optimizer) -> None:
         if not self._optimizer_state_offload_enabled():
             return
+        named_params = self.module_manager.selected_module_named_parameters()
+        self._restore_shadow_params(optimizer, named_params, label="module")
         self._move_optimizer_state_to_param_devices(
             optimizer,
-            self.module_manager.selected_module_named_parameters(),
+            named_params,
             label="module",
         )
 
@@ -340,6 +392,7 @@ class SequentialLoraPlusMTrainer:
         if not self._optimizer_state_offload_enabled():
             return
         self._move_optimizer_state_to_cpu(optimizer, label="module")
+        self._offload_shadow_params(optimizer, label="module")
 
     def _move_optimizer_state_to_cpu(self, optimizer: torch.optim.Optimizer, label: str) -> None:
         moved = 0
@@ -363,7 +416,11 @@ class SequentialLoraPlusMTrainer:
         label: str,
     ) -> None:
         moved = 0
-        for _, param in named_params:
+        if isinstance(optimizer, Fp32ShadowAdamW):
+            params = optimizer.hp_parameters_for_lp(named_params)
+        else:
+            params = [param for _, param in named_params]
+        for param in params:
             state = optimizer.state.get(param)
             if not state:
                 continue
@@ -428,6 +485,8 @@ class SequentialLoraPlusMTrainer:
                 module_trainable_params / max(1, self.module_manager.total_candidate_params)
             ),
             "ratio_denominator": "total_model_params",
+            "module_optimizer_update_dtype": self.module_optimizer_dtype,
+            "module_gradient_mode": self.module_gradient_mode,
         }
         self._module_param_records.append(record)
         if method == "static_random":
@@ -476,6 +535,10 @@ class SequentialLoraPlusMTrainer:
             "lora_optimizer_reset_events": int(self._lora_optimizer_reset_events),
             "lora_optimizer_reset_params": int(self._lora_optimizer_reset_params),
             "module_optimizer_state_strategy": self.module_optimizer_state_strategy,
+            "module_optimizer_reset_each_block": self.module_optimizer_state_strategy == "reset_offload",
+            "lora_optimizer_update_dtype": self.lora_optimizer_dtype,
+            "module_optimizer_update_dtype": self.module_optimizer_dtype,
+            "module_gradient_mode": self.module_gradient_mode,
             "optimizer_state_offload_events": int(self._optimizer_state_offload_events),
             "optimizer_state_restore_events": int(self._optimizer_state_restore_events),
             "optimizer_state_tensors_moved": int(self._optimizer_state_tensors_moved),
@@ -587,7 +650,17 @@ class SequentialLoraPlusMTrainer:
         named_params: List[Tuple[str, torch.nn.Parameter]],
         learning_rate: float,
         include_frozen: bool = False,
+        optimizer_dtype: str = "bf16",
     ) -> torch.optim.Optimizer:
+        if optimizer_dtype == "fp32":
+            return Fp32ShadowAdamW(
+                named_params=named_params,
+                lr=learning_rate,
+                weight_decay=self.weight_decay,
+                use_weight_decay=self._use_weight_decay,
+                include_frozen=include_frozen,
+            )
+
         decay_params: List[torch.nn.Parameter] = []
         no_decay_params: List[torch.nn.Parameter] = []
         for name, param in named_params:
@@ -605,26 +678,93 @@ class SequentialLoraPlusMTrainer:
 
     def _get_module_optimizer(self, force_recreate: bool = False) -> Optional[torch.optim.Optimizer]:
         persistent = self.module_optimizer_state_strategy == "persistent_offload"
-        named_params = (
-            self.module_manager.module_named_parameters()
-            if persistent
-            else self.module_manager.selected_module_named_parameters()
-        )
-        if not named_params:
+        selected_named_params = self.module_manager.selected_module_named_parameters()
+        if not selected_named_params:
             return None
+
+        if persistent and self.module_optimizer_dtype == "fp32":
+            key = ("persistent_fp32_shadow",)
+            if self._module_optimizer is None:
+                self._module_optimizer = self._create_optimizer(
+                    selected_named_params,
+                    self.module_learning_rate,
+                    optimizer_dtype=self.module_optimizer_dtype,
+                )
+                self._module_optimizer_key = key
+            elif isinstance(self._module_optimizer, Fp32ShadowAdamW):
+                added = self._module_optimizer.add_named_params(selected_named_params)
+                if added:
+                    print(f"[loraplusMSeq] persistent fp32 shadow added module params={added}", flush=True)
+            return self._module_optimizer
+
+        named_params = self.module_manager.module_named_parameters() if persistent else selected_named_params
         key = tuple(name for name, _ in named_params)
         if force_recreate or self._module_optimizer is None or key != self._module_optimizer_key:
+            self._discard_module_optimizer()
             self._module_optimizer = self._create_optimizer(
                 named_params,
                 self.module_learning_rate,
                 include_frozen=persistent,
+                optimizer_dtype=self.module_optimizer_dtype,
             )
             self._module_optimizer_key = key
         return self._module_optimizer
 
-    def _use_weight_decay(self, name: str) -> bool:
+    def _attach_module_gradient_hooks(self) -> List[torch.utils.hooks.RemovableHandle]:
+        if self.module_gradient_mode != "residual":
+            return []
+        handles = attach_residual_grad_hooks(
+            candidate_by_name=self.module_manager.candidate_by_name,
+            selected_names=self.module_manager.selected_names,
+            adapter_name="default",
+            rtol=self.residual_rtol,
+        )
+        print(
+            f"[loraplusMSeq] module residual gradient hooks={len(handles)} "
+            f"selected={len(self.module_manager.selected_names)}",
+            flush=True,
+        )
+        return handles
+
+    def _restore_shadow_params(
+        self,
+        optimizer: torch.optim.Optimizer,
+        named_params: List[Tuple[str, torch.nn.Parameter]],
+        label: str,
+    ) -> None:
+        if not isinstance(optimizer, Fp32ShadowAdamW):
+            return
+        moved = optimizer.move_hp_params_to_lp_devices(named_params)
+        if moved:
+            print(f"[loraplusMSeq] optimizer fp32 shadow restore label={label} params={moved}", flush=True)
+
+    def _offload_shadow_params(self, optimizer: torch.optim.Optimizer, label: str) -> None:
+        if not isinstance(optimizer, Fp32ShadowAdamW):
+            return
+        moved = optimizer.move_hp_params_to_cpu()
+        if moved:
+            print(f"[loraplusMSeq] optimizer fp32 shadow offload label={label} params={moved}", flush=True)
+
+    def _discard_module_optimizer(self) -> None:
+        if self._module_optimizer is None:
+            return
+        if isinstance(self._module_optimizer, Fp32ShadowAdamW):
+            self._module_optimizer.close()
+        else:
+            self._module_optimizer.zero_grad(set_to_none=True)
+            self._module_optimizer.state.clear()
+            for group in self._module_optimizer.param_groups:
+                group["params"] = []
+        self._module_optimizer = None
+        self._module_optimizer_key = None
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+
+    def _use_weight_decay(self, name: str, param: Optional[torch.nn.Parameter] = None) -> bool:
         no_decay_terms = ("bias", "layer_norm.weight", "LayerNorm.weight", "norm.weight")
-        return not any(term in name for term in no_decay_terms)
+        if any(term in name for term in no_decay_terms):
+            return False
+        return param is None or len(param.shape) >= 2
 
     def _set_optimizer_lr(self, optimizer: torch.optim.Optimizer, base_lr: float) -> None:
         lr = self._lr_for_step(self.global_step, base_lr)
@@ -669,3 +809,8 @@ class SequentialLoraPlusMTrainer:
         with open(self._train_log_path, "a", encoding="utf-8") as f:
             f.write(json.dumps(record, ensure_ascii=False) + "\n")
         print(f"[loraplusMSeq] log {record}", flush=True)
+
+    def _max_cuda_memory_gib(self) -> float:
+        if not torch.cuda.is_available():
+            return 0.0
+        return float(torch.cuda.max_memory_allocated() / 1024**3)
