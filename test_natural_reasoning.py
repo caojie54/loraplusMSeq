@@ -15,6 +15,57 @@ from transformers.pipelines.pt_utils import KeyDataset
 
 from loraplusmseq.data import get_formatted_datasets
 
+DEFAULT_DO_SAMPLE = False
+DEFAULT_TEMPERATURE = 0.6
+DEFAULT_TOP_P = 0.9
+
+
+def str2bool(value):
+    if isinstance(value, bool):
+        return value
+    lowered = value.lower()
+    if lowered in {"true", "1", "yes", "y", "on"}:
+        return True
+    if lowered in {"false", "0", "no", "n", "off"}:
+        return False
+    raise argparse.ArgumentTypeError(f"Expected a boolean value, got {value!r}")
+
+
+def add_generation_args(parser):
+    parser.add_argument(
+        "--do_sample",
+        type=str2bool,
+        nargs="?",
+        const=True,
+        default=None,
+        help="Use sampling. Defaults to false/greedy when omitted; pass --do_sample true for sampling.",
+    )
+    parser.add_argument("--temperature", type=float, default=None, help="Sampling temperature. Defaults to 0.6 when sampling is enabled.")
+    parser.add_argument("--top_p", type=float, default=None, help="Nucleus sampling top-p. Defaults to 0.9 when sampling is enabled.")
+
+
+def build_generation_config(args, tokenizer):
+    do_sample = DEFAULT_DO_SAMPLE if args.do_sample is None else args.do_sample
+    generation_kwargs = {
+        "max_new_tokens": args.max_new_tokens,
+        "do_sample": do_sample,
+    }
+    if tokenizer.pad_token_id is not None:
+        generation_kwargs["pad_token_id"] = tokenizer.pad_token_id
+    if tokenizer.eos_token_id is not None:
+        generation_kwargs["eos_token_id"] = tokenizer.eos_token_id
+
+    if do_sample:
+        generation_kwargs["temperature"] = DEFAULT_TEMPERATURE if args.temperature is None else args.temperature
+        generation_kwargs["top_p"] = DEFAULT_TOP_P if args.top_p is None else args.top_p
+    else:
+        if args.temperature is not None:
+            generation_kwargs["temperature"] = args.temperature
+        if args.top_p is not None:
+            generation_kwargs["top_p"] = args.top_p
+
+    return GenerationConfig(**generation_kwargs)
+
 
 def parse_args():
     parser = argparse.ArgumentParser(
@@ -30,6 +81,7 @@ def parse_args():
     parser.add_argument("--benchmarks", nargs="+", default=["gpqa_diamond", "math_500", "mmlu_pro_500"])
     parser.add_argument("--max_new_tokens", type=int, default=1536)
     parser.add_argument("--batch_size", type=int, default=64)
+    add_generation_args(parser)
     parser.add_argument("--output_dir", type=str, default=None, help="Optional root directory for predictions; defaults to model_path for backward compatibility.")
     parser.add_argument("--bf16", action="store_true", default=True)
     parser.add_argument("--trust_remote_code", action="store_true", default=True)
@@ -104,12 +156,8 @@ def main():
     os.makedirs(predictions_dir, exist_ok=True)
     print(f"Predictions will be saved to {predictions_dir}")
 
-    generation_config = GenerationConfig(
-        max_new_tokens=args.max_new_tokens,
-        do_sample=False,
-        pad_token_id=tokenizer.pad_token_id,
-        eos_token_id=tokenizer.eos_token_id,
-    )
+    generation_config = build_generation_config(args, tokenizer)
+    print(f"Generation config: {generation_config}")
     pipeline = TextGenerationPipeline(model=model, tokenizer=tokenizer)
 
     for benchmark in args.benchmarks:
@@ -122,6 +170,7 @@ def main():
             pipeline(
                 KeyDataset(formatted["test"], "text"),
                 generation_config=generation_config,
+                use_model_defaults=False,
                 return_full_text=False,
                 batch_size=args.batch_size,
             ),

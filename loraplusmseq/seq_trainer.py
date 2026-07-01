@@ -196,6 +196,7 @@ class SequentialLoraPlusMTrainer:
             "optimizer_state_offload_events": int(self._optimizer_state_offload_events),
             "optimizer_state_restore_events": int(self._optimizer_state_restore_events),
             "optimizer_state_tensors_moved": int(self._optimizer_state_tensors_moved),
+            "max_memory_gib": float(self._max_cuda_memory_gib()),
         }
         with open(os.path.join(self.output_dir, "train_metrics.json"), "w", encoding="utf-8") as f:
             json.dump(metrics, f, ensure_ascii=False, indent=2)
@@ -542,6 +543,7 @@ class SequentialLoraPlusMTrainer:
             "optimizer_state_offload_events": int(self._optimizer_state_offload_events),
             "optimizer_state_restore_events": int(self._optimizer_state_restore_events),
             "optimizer_state_tensors_moved": int(self._optimizer_state_tensors_moved),
+            "max_memory_gib": float(self._max_cuda_memory_gib()),
         }
         with open(self._trainable_params_path, "w", encoding="utf-8") as f:
             json.dump(stats, f, ensure_ascii=False, indent=2)
@@ -805,6 +807,7 @@ class SequentialLoraPlusMTrainer:
             "lora_loss": sum(losses["lora"][-self.logging_steps :]) / max(1, len(losses["lora"][-self.logging_steps :])),
             "module_loss": sum(losses["module"][-self.logging_steps :])
             / max(1, len(losses["module"][-self.logging_steps :])),
+            "max_memory_gib": float(self._max_cuda_memory_gib()),
         }
         with open(self._train_log_path, "a", encoding="utf-8") as f:
             f.write(json.dumps(record, ensure_ascii=False) + "\n")
