@@ -6,6 +6,12 @@ cd "$(dirname "$0")"
 source /mnt/petrelfs/caojie1/anaconda3/etc/profile.d/conda.sh
 conda activate comol
 
+export TOKENIZERS_PARALLELISM=${TOKENIZERS_PARALLELISM:-false}
+export PYTORCH_CUDA_ALLOC_CONF=${PYTORCH_CUDA_ALLOC_CONF:-expandable_segments:True}
+export HF_HOME=${HF_HOME:-/mnt/dhwfile/raise/user/caojie/huggingface}
+export HF_HUB_OFFLINE=${HF_HUB_OFFLINE:-1}
+export TRANSFORMERS_OFFLINE=${TRANSFORMERS_OFFLINE:-1}
+
 METHOD=${METHOD:-alpha}
 BASE_MODEL_PATH=${BASE_MODEL_PATH:-meta-llama/Llama-3.1-8B}
 DATASET_PATH=${DATASET_PATH:-/mnt/petrelfs/caojie1/projects/CoMoL/datasets/commonsense170k}

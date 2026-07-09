@@ -21,6 +21,7 @@ RANK=${RANK:-64}
 LORA_LR=${LORA_LR:-1e-4}
 MODULE_LR=${MODULE_LR:-1e-5}
 LORA_DROPOUT=${LORA_DROPOUT:-0.0}
+SEED=${SEED:-0}
 COMP_RATIO=${COMP_RATIO:-0.02}
 SELECTION_INTERVAL=${SELECTION_INTERVAL:-625}
 ALPHA_SCORE=${ALPHA_SCORE:-lora_grad_norm}
@@ -132,6 +133,7 @@ python train.py \
   --module_optimizer_dtype="${MODULE_OPTIMIZER_DTYPE}" \
   --module_gradient_mode="${MODULE_GRADIENT_MODE}" \
   --residual_rtol="${RESIDUAL_RTOL}" \
+  --seed="${SEED}" \
   --gradient_checkpointing="${GRADIENT_CHECKPOINTING}" \
   --save_merged_model="${SAVE_MERGED_MODEL}" \
   --output_dir="${OUTPUT_ROOT}" \
