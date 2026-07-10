@@ -32,8 +32,15 @@ class CandidateModule:
         }
 
 
+def _matched_target(module_name: str, target_modules: Sequence[str]) -> Optional[str]:
+    for target in target_modules:
+        if module_name == target or module_name.endswith(f".{target}"):
+            return target
+    return None
+
+
 def _target_match(module_name: str, target_modules: Sequence[str]) -> bool:
-    return module_name.split(".")[-1] in set(target_modules)
+    return _matched_target(module_name, target_modules) is not None
 
 
 def _is_peft_lora_linear(module: nn.Module) -> bool:
@@ -50,7 +57,8 @@ def collect_candidate_modules(model: nn.Module, target_modules: Sequence[str]) -
     """Collect LoRA-wrapped Linear modules whose original weights may compensate LoRA."""
     candidates: List[CandidateModule] = []
     for module_name, module in model.named_modules():
-        if not _target_match(module_name, target_modules) or not _is_peft_lora_linear(module):
+        matched_target = _matched_target(module_name, target_modules)
+        if matched_target is None or not _is_peft_lora_linear(module):
             continue
         weight = module.base_layer.weight
         num_params = weight.numel()
@@ -59,7 +67,7 @@ def collect_candidate_modules(model: nn.Module, target_modules: Sequence[str]) -
         candidates.append(
             CandidateModule(
                 name=module_name,
-                short_name=module_name.split(".")[-1],
+                short_name=matched_target,
                 num_params=num_params,
                 weight_shape=list(weight.shape),
                 module=module,

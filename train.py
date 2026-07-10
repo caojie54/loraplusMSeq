@@ -166,6 +166,33 @@ def configure_tokenizer(tokenizer, model_path: str) -> None:
         tokenizer.pad_token = tokenizer.eos_token
 
 
+
+def count_original_llm_params(model: torch.nn.Module) -> int:
+    total = int(sum(param.numel() for name, param in model.named_parameters() if "lora_" not in name))
+    if total > 0:
+        return total
+    return int(sum(param.numel() for param in model.parameters()))
+
+
+def resolve_peft_target_modules(model: torch.nn.Module, target_modules):
+    """Limit multimodal Gemma-4 targets to the language model path."""
+    target_set = set(target_modules)
+    language_targets = [
+        name
+        for name, module in model.named_modules()
+        if name.startswith("model.language_model.")
+        and name.split(".")[-1] in target_set
+        and isinstance(module, torch.nn.Linear)
+    ]
+    if language_targets:
+        print(
+            f"Resolved PEFT target modules to {len(language_targets)} language_model modules "
+            f"from suffixes={list(target_modules)}",
+            flush=True,
+        )
+        return language_targets
+    return list(target_modules)
+
 def main():
     args = parse_args()
     transformers.set_seed(args.seed)
@@ -221,6 +248,7 @@ def main():
     if args.gradient_checkpointing:
         base_model.gradient_checkpointing_enable()
 
+    peft_target_modules = resolve_peft_target_modules(base_model, args.target_modules)
     lora_alpha = args.lora_alpha if args.lora_alpha is not None else args.lora_rank
     peft_config = LoraConfig(
         task_type=TaskType.CAUSAL_LM,
@@ -228,7 +256,7 @@ def main():
         r=args.lora_rank,
         lora_alpha=lora_alpha,
         lora_dropout=args.lora_dropout,
-        target_modules=args.target_modules,
+        target_modules=peft_target_modules,
         bias="none",
     )
     model = get_peft_model(base_model, peft_config)
@@ -241,10 +269,10 @@ def main():
         os.remove(history_path)
     module_manager = CompensationModuleManager(
         model=model,
-        target_modules=args.target_modules,
+        target_modules=peft_target_modules,
         method=args.method,
         param_ratio=args.compensation_ratio,
-        total_model_params=sum(param.numel() for name, param in model.named_parameters() if "lora_" not in name),
+        total_model_params=count_original_llm_params(model),
         seed=args.seed,
         alpha_score=args.alpha_score,
         history_path=history_path,

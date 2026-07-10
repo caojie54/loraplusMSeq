@@ -44,6 +44,14 @@ def add_generation_args(parser):
     parser.add_argument("--top_p", type=float, default=None, help="Nucleus sampling top-p. Defaults to 0.9 when sampling is enabled.")
 
 
+
+def supports_use_model_defaults():
+    try:
+        return int(transformers.__version__.split(".", 1)[0]) < 5
+    except (IndexError, ValueError):
+        return True
+
+
 def build_generation_config(args, tokenizer):
     do_sample = DEFAULT_DO_SAMPLE if args.do_sample is None else args.do_sample
     generation_kwargs = {
@@ -170,7 +178,7 @@ def main():
             pipeline(
                 KeyDataset(formatted["test"], "text"),
                 generation_config=generation_config,
-                use_model_defaults=False,
+                **({"use_model_defaults": False} if supports_use_model_defaults() else {}),
                 return_full_text=False,
                 batch_size=args.batch_size,
             ),
