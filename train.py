@@ -43,6 +43,8 @@ def build_output_dir(args) -> str:
         method_name += f"-interval{args.selection_interval}"
         if args.method == "alpha":
             method_name += f"-{args.alpha_score}"
+            if args.alpha_candidate_ratio > args.compensation_ratio:
+                method_name += f"-candidate_ratio{args.alpha_candidate_ratio}"
         if args.lora_optimizer_reset_strategy != "keep":
             method_name += f"-loraopt{args.lora_optimizer_reset_strategy}"
         if args.module_optimizer_state_strategy != "reset_offload":
@@ -78,7 +80,7 @@ def parse_args():
     parser.add_argument("--target_modules", type=str, nargs="+", default=["q_proj", "v_proj"])
     parser.add_argument("--lora_rank", type=int, default=32)
     parser.add_argument("--lora_alpha", type=int, default=None)
-    parser.add_argument("--lora_dropout", type=float, default=0.1)
+    parser.add_argument("--lora_dropout", type=float, default=0)
     parser.add_argument("--max_length", type=int, default=256)
     parser.add_argument("--batch_size", type=int, default=16)
     parser.add_argument("--gradient_accumulation_steps", type=int, default=1)
@@ -106,8 +108,44 @@ def parse_args():
         "--alpha_score",
         type=str,
         default="lora_grad_norm",
-        choices=["lora_update_ratio", "lora_grad_norm", "lora_grad_norm_min"],
+        choices=[
+            "lora_update_ratio",
+            "lora_grad_norm",
+            "lora_grad_norm_min",
+            "lora_effective_update_pressure",
+        ],
         help="Score accumulated from LoRA gradients during the LoRA phase.",
+    )
+    parser.add_argument(
+        "--alpha_candidate_ratio",
+        type=float,
+        default=0.0,
+        help="Larger ratio2 candidate-pool budget for alpha sampling. Disabled unless greater than compensation_ratio.",
+    )
+    parser.add_argument(
+        "--alpha_sampling_temperature",
+        type=float,
+        default=1.0,
+        help="Softmax temperature for alpha ratio2 importance sampling.",
+    )
+    parser.add_argument(
+        "--alpha_uniform_mix",
+        type=float,
+        default=0.1,
+        help="Uniform exploration mixture for alpha ratio2 importance sampling.",
+    )
+    parser.add_argument(
+        "--alpha_score_gamma",
+        type=float,
+        default=1.0,
+        help="Parameter-count penalty on alpha sampling scores: log(score) - gamma * log(num_params).",
+    )
+    parser.add_argument(
+        "--alpha_group_norm",
+        type=str,
+        default="none",
+        choices=["none", "global", "type"],
+        help="Optional z-score normalization for alpha sampling scores before building the ratio2 pool.",
     )
     parser.add_argument(
         "--lora_optimizer_reset_strategy",
@@ -275,6 +313,11 @@ def main():
         total_model_params=count_original_llm_params(model),
         seed=args.seed,
         alpha_score=args.alpha_score,
+        alpha_candidate_ratio=args.alpha_candidate_ratio,
+        alpha_sampling_temperature=args.alpha_sampling_temperature,
+        alpha_uniform_mix=args.alpha_uniform_mix,
+        alpha_score_gamma=args.alpha_score_gamma,
+        alpha_group_norm=args.alpha_group_norm,
         history_path=history_path,
     )
     module_manager.save_candidates(os.path.join(output_dir, "candidate_modules.json"))

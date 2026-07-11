@@ -4,7 +4,7 @@ set -euo pipefail
 cd "$(dirname "$0")"
 
 source /mnt/petrelfs/caojie1/anaconda3/etc/profile.d/conda.sh
-conda activate comol
+conda activate loraplusm
 
 export TOKENIZERS_PARALLELISM=${TOKENIZERS_PARALLELISM:-false}
 export PYTORCH_CUDA_ALLOC_CONF=${PYTORCH_CUDA_ALLOC_CONF:-expandable_segments:True}
@@ -25,6 +25,11 @@ SEED=${SEED:-0}
 COMP_RATIO=${COMP_RATIO:-0.02}
 SELECTION_INTERVAL=${SELECTION_INTERVAL:-625}
 ALPHA_SCORE=${ALPHA_SCORE:-lora_grad_norm}
+ALPHA_CANDIDATE_RATIO=${ALPHA_CANDIDATE_RATIO:-0}
+ALPHA_SAMPLING_TEMPERATURE=${ALPHA_SAMPLING_TEMPERATURE:-1.0}
+ALPHA_UNIFORM_MIX=${ALPHA_UNIFORM_MIX:-0.1}
+ALPHA_SCORE_GAMMA=${ALPHA_SCORE_GAMMA:-1.0}
+ALPHA_GROUP_NORM=${ALPHA_GROUP_NORM:-none}
 LORA_OPTIMIZER_RESET_STRATEGY=${LORA_OPTIMIZER_RESET_STRATEGY:-keep}
 LORA_OPTIMIZER_DTYPE=${LORA_OPTIMIZER_DTYPE:-bf16}
 MODULE_OPTIMIZER_DTYPE=${MODULE_OPTIMIZER_DTYPE:-bf16}
@@ -46,8 +51,13 @@ if [[ "${METHOD}" == "alpha" ]]; then
     METHOD_DESC="${METHOD_DESC}-gradnorm"
   elif [[ "${ALPHA_SCORE}" == "lora_grad_norm_min" ]]; then
     METHOD_DESC="${METHOD_DESC}-gradnormmin"
+  elif [[ "${ALPHA_SCORE}" == "lora_effective_update_pressure" ]]; then
+    METHOD_DESC="${METHOD_DESC}-effectivepressure"
   else
     METHOD_DESC="${METHOD_DESC}-${ALPHA_SCORE}"
+  fi
+  if [[ "${ALPHA_CANDIDATE_RATIO}" != "0" ]]; then
+    METHOD_DESC="${METHOD_DESC}-candidate${ALPHA_CANDIDATE_RATIO}"
   fi
 fi
 if [[ "${MODULE_OPTIMIZER_STATE_STRATEGY}" != "reset_offload" ]]; then
@@ -127,6 +137,11 @@ python train.py \
   --selection_interval="${SELECTION_INTERVAL}" \
   --compensation_ratio="${COMP_RATIO}" \
   --alpha_score="${ALPHA_SCORE}" \
+  --alpha_candidate_ratio="${ALPHA_CANDIDATE_RATIO}" \
+  --alpha_sampling_temperature="${ALPHA_SAMPLING_TEMPERATURE}" \
+  --alpha_uniform_mix="${ALPHA_UNIFORM_MIX}" \
+  --alpha_score_gamma="${ALPHA_SCORE_GAMMA}" \
+  --alpha_group_norm="${ALPHA_GROUP_NORM}" \
   --lora_optimizer_reset_strategy="${LORA_OPTIMIZER_RESET_STRATEGY}" \
   --module_optimizer_state_strategy="${MODULE_OPTIMIZER_STATE_STRATEGY}" \
   --lora_optimizer_dtype="${LORA_OPTIMIZER_DTYPE}" \

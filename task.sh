@@ -23,6 +23,11 @@ MODULE_LR=${MODULE_LR:-1e-5}
 COMP_RATIO=${COMP_RATIO:-0.005}
 SELECTION_INTERVAL=${SELECTION_INTERVAL:-50}
 ALPHA_SCORE=${ALPHA_SCORE:-lora_grad_norm}
+ALPHA_CANDIDATE_RATIO=${ALPHA_CANDIDATE_RATIO:-0}
+ALPHA_SAMPLING_TEMPERATURE=${ALPHA_SAMPLING_TEMPERATURE:-1.0}
+ALPHA_UNIFORM_MIX=${ALPHA_UNIFORM_MIX:-0.1}
+ALPHA_SCORE_GAMMA=${ALPHA_SCORE_GAMMA:-1.0}
+ALPHA_GROUP_NORM=${ALPHA_GROUP_NORM:-none}
 LORA_OPTIMIZER_RESET_STRATEGY=${LORA_OPTIMIZER_RESET_STRATEGY:-keep}
 LORA_OPTIMIZER_DTYPE=${LORA_OPTIMIZER_DTYPE:-bf16}
 MODULE_OPTIMIZER_DTYPE=${MODULE_OPTIMIZER_DTYPE:-bf16}
@@ -37,6 +42,9 @@ else
   SAVE_MERGED_MODEL=${SAVE_MERGED_MODEL:-true}
 fi
 COMP_DESC=ratio${COMP_RATIO}
+if [[ "${METHOD}" == "alpha" && "${ALPHA_CANDIDATE_RATIO}" != "0" ]]; then
+  COMP_DESC="${COMP_DESC}-candidate${ALPHA_CANDIDATE_RATIO}"
+fi
 RUN_NAME=${RUN_NAME:-llama-3-1-8b-seq-${METHOD}-qkvogateupdown-rank${RANK}-commonsense170k-epoch${NUM_TRAIN_EPOCHS}-${COMP_DESC}-block${SELECTION_INTERVAL}-loralr${LORA_LR}-modulelr${MODULE_LR}}
 EVAL_AFTER_TRAIN=${EVAL_AFTER_TRAIN:-1}
 
@@ -65,6 +73,11 @@ python train.py \
   --selection_interval="${SELECTION_INTERVAL}" \
   --compensation_ratio="${COMP_RATIO}" \
   --alpha_score="${ALPHA_SCORE}" \
+  --alpha_candidate_ratio="${ALPHA_CANDIDATE_RATIO}" \
+  --alpha_sampling_temperature="${ALPHA_SAMPLING_TEMPERATURE}" \
+  --alpha_uniform_mix="${ALPHA_UNIFORM_MIX}" \
+  --alpha_score_gamma="${ALPHA_SCORE_GAMMA}" \
+  --alpha_group_norm="${ALPHA_GROUP_NORM}" \
   --lora_optimizer_reset_strategy="${LORA_OPTIMIZER_RESET_STRATEGY}" \
   --module_optimizer_state_strategy="${MODULE_OPTIMIZER_STATE_STRATEGY}" \
   --lora_optimizer_dtype="${LORA_OPTIMIZER_DTYPE}" \

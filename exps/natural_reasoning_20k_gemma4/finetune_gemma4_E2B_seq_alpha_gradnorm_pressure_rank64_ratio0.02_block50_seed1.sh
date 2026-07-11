@@ -30,4 +30,4 @@ MODULE_OPTIMIZER_STATE_STRATEGY=reset_offload \
 MODULE_GRADIENT_MODE=full \
 SAVE_MERGED_MODEL=true \
 RUN_NAME=gemma-4-E2B-seq-alpha-gradnorm-pressure-qkvogateupdown-rank64-natural-reasoning-20k-epoch1-ratio0.02-block50-seed1-loraoptbf16-moduleoptfp32-resetoffload-loralr1e-4-modulelr1e-5 \
-bash task_natural_reasoning_gemma4_loraplusm.sh
+bash task_natural_reasoning.sh

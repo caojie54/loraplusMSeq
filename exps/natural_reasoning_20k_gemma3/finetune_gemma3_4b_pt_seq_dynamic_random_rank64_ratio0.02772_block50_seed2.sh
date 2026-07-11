@@ -22,4 +22,4 @@ GRADIENT_CHECKPOINTING=false \
 REQUIRED_FREE_GB=75 \
 TEST_MAX_NEW_TOKENS=1536 \
 TEST_BATCH_SIZE=120 \
-bash task_natural_reasoning_gemma4_loraplusm.sh
+bash task_natural_reasoning.sh
