@@ -166,7 +166,6 @@ def main():
             pipeline(
                 KeyDataset(formatted_datasets["test"], "text"),
                 generation_config=generation_config,
-                use_model_defaults=False,
                 return_full_text=False,
                 batch_size=args.batch_size,
             ),

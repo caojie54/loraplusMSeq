@@ -4,7 +4,7 @@ set -euo pipefail
 cd "$(dirname "$0")"
 
 source /mnt/petrelfs/caojie1/anaconda3/etc/profile.d/conda.sh
-conda activate comol
+conda activate loraplusm
 
 export TOKENIZERS_PARALLELISM=${TOKENIZERS_PARALLELISM:-false}
 export PYTORCH_CUDA_ALLOC_CONF=${PYTORCH_CUDA_ALLOC_CONF:-expandable_segments:True}
@@ -20,6 +20,7 @@ OUTPUT_ROOT=${OUTPUT_ROOT:-/mnt/dhwfile/raise/user/caojie/loraplusMSeq/outputs/c
 RANK=${RANK:-32}
 LORA_LR=${LORA_LR:-1e-4}
 MODULE_LR=${MODULE_LR:-1e-5}
+LORA_DROPOUT=${LORA_DROPOUT:-0.0}
 COMP_RATIO=${COMP_RATIO:-0.005}
 SELECTION_INTERVAL=${SELECTION_INTERVAL:-50}
 ALPHA_SCORE=${ALPHA_SCORE:-lora_grad_norm}
@@ -47,6 +48,40 @@ if [[ "${METHOD}" == "alpha" && "${ALPHA_CANDIDATE_RATIO}" != "0" ]]; then
 fi
 RUN_NAME=${RUN_NAME:-llama-3-1-8b-seq-${METHOD}-qkvogateupdown-rank${RANK}-commonsense170k-epoch${NUM_TRAIN_EPOCHS}-${COMP_DESC}-block${SELECTION_INTERVAL}-loralr${LORA_LR}-modulelr${MODULE_LR}}
 EVAL_AFTER_TRAIN=${EVAL_AFTER_TRAIN:-1}
+MAX_LENGTH=${MAX_LENGTH:-256}
+TRAIN_BATCH_SIZE=${TRAIN_BATCH_SIZE:-16}
+GRADIENT_ACCUMULATION_STEPS=${GRADIENT_ACCUMULATION_STEPS:-2}
+WARMUP_STEPS=${WARMUP_STEPS:-200}
+SEED=${SEED:-0}
+REQUIRED_FREE_GB=${REQUIRED_FREE_GB:-0}
+TEST_MAX_NEW_TOKENS=${TEST_MAX_NEW_TOKENS:-64}
+TEST_BATCH_SIZE=${TEST_BATCH_SIZE:-256}
+
+if [[ "${REQUIRED_FREE_GB}" != "0" ]]; then
+  echo "Initial CUDA_VISIBLE_DEVICES=${CUDA_VISIBLE_DEVICES:-}"
+  echo "SLURM_JOB_GPUS=${SLURM_JOB_GPUS:-}"
+  nvidia-smi || true
+  allocated_gpu="${CUDA_VISIBLE_DEVICES:-${SLURM_JOB_GPUS:-}}"
+  allocated_gpu="${allocated_gpu%%,*}"
+  allocated_gpu="${allocated_gpu//[[:space:]]/}"
+  if [[ "${allocated_gpu}" =~ ^[0-9]+$ ]]; then
+    query_gpu="${allocated_gpu}"
+  else
+    query_gpu=0
+  fi
+  IFS=, read -r gpu_id total_mem used_mem < <(
+    nvidia-smi -i "${query_gpu}" --query-gpu=index,memory.total,memory.used --format=csv,noheader,nounits
+  )
+  gpu_id="${gpu_id//[[:space:]]/}"
+  total_mem="${total_mem//[[:space:]]/}"
+  used_mem="${used_mem//[[:space:]]/}"
+  free_mem_gb=$(( (total_mem - used_mem) / 1024 ))
+  echo "Allocated GPU check: query_gpu=${query_gpu} nvidia_gpu=${gpu_id} total=${total_mem}MiB used=${used_mem}MiB free=${free_mem_gb}GiB required=${REQUIRED_FREE_GB}GiB"
+  if (( free_mem_gb < REQUIRED_FREE_GB )); then
+    echo "Allocated GPU does not have enough free memory; exiting for resubmission."
+    exit 2
+  fi
+fi
 
 python train.py \
   --model_path="${BASE_MODEL_PATH}" \
@@ -61,14 +96,15 @@ python train.py \
   gate_proj \
   up_proj \
   down_proj \
-  --max_length=256 \
-  --batch_size=16 \
-  --gradient_accumulation_steps=2 \
+  --lora_dropout="${LORA_DROPOUT}" \
+  --max_length="${MAX_LENGTH}" \
+  --batch_size="${TRAIN_BATCH_SIZE}" \
+  --gradient_accumulation_steps="${GRADIENT_ACCUMULATION_STEPS}" \
   --num_train_epochs="${NUM_TRAIN_EPOCHS}" \
   --learning_rate="${LORA_LR}" \
   --module_learning_rate="${MODULE_LR}" \
   --lr_scheduler_type=constant_with_warmup \
-  --warmup_steps=200 \
+  --warmup_steps="${WARMUP_STEPS}" \
   --weight_decay=0.0 \
   --selection_interval="${SELECTION_INTERVAL}" \
   --compensation_ratio="${COMP_RATIO}" \
@@ -84,6 +120,7 @@ python train.py \
   --module_optimizer_dtype="${MODULE_OPTIMIZER_DTYPE}" \
   --module_gradient_mode="${MODULE_GRADIENT_MODE}" \
   --residual_rtol="${RESIDUAL_RTOL}" \
+  --seed="${SEED}" \
   --save_merged_model="${SAVE_MERGED_MODEL}" \
   --output_dir="${OUTPUT_ROOT}" \
   --run_name="${RUN_NAME}"
@@ -93,8 +130,8 @@ if [[ "${EVAL_AFTER_TRAIN}" == "1" ]]; then
   python test_commonsense.py \
     --model_path="${MODEL_DIR}" \
     --data_path="${EVAL_DATA_PATH}" \
-    --max_new_tokens=64 \
-    --batch_size=256
+    --max_new_tokens="${TEST_MAX_NEW_TOKENS}" \
+    --batch_size="${TEST_BATCH_SIZE}"
 
   python evaluate_commonsense.py --predict_file "${MODEL_DIR}/predictions/boolq_responses.jsonl"
 fi
