@@ -4,6 +4,17 @@ Sequential LoRA plus selected compensation-module training. The project supports
 
 For each n-batch, the trainer first updates LoRA parameters. It then selects original base modules and replays the same cached n-batch with LoRA frozen and only the selected original module weights trainable.
 
+## Installation
+
+```bash
+# create enviroment
+conda create -n mlora python==3.13
+
+# Install required dependencies
+pip install -r requirements.txt
+
+```
+
 ## Selection methods
 
 - `alpha`: select modules by accumulated LoRA gradient pressure. Use `--alpha_score lora_grad_norm`, `lora_grad_norm_min`, or `lora_update_ratio`.
