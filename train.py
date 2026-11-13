@@ -9,9 +9,10 @@ from typing import Dict
 import torch
 import transformers
 from peft import LoraConfig, TaskType, get_peft_model
-from transformers import AutoModelForCausalLM, AutoTokenizer, DataCollatorForLanguageModeling
+from transformers import AutoModelForCausalLM, AutoTokenizer, DataCollatorForLanguageModeling, DataCollatorForSeq2Seq
 
 from loraplusmseq.data import get_formatted_datasets
+from loraplusmseq.medreason_data import load_medreason, tokenize_medreason
 from loraplusmseq.module_selection import CompensationModuleManager, set_lora_only_trainable
 from loraplusmseq.seq_trainer import SequentialLoraPlusMTrainer
 
@@ -70,6 +71,8 @@ def parse_args():
     parser.add_argument("--data_path", type=str, default="/mnt/petrelfs/caojie1/projects/CoMoL/datasets/commonsense170k")
     parser.add_argument("--output_dir", type=str, default="/mnt/dhwfile/raise/user/caojie/loraplusMSeq/outputs/commonsense170k")
     parser.add_argument("--run_name", type=str, default=None)
+    parser.add_argument("--data_format", choices=["default", "medreason"], default="default",
+                        help="medreason uses plain question/reasoning/answer text and response-only loss.")
     parser.add_argument(
         "--method",
         type=str,
@@ -240,7 +243,10 @@ def main():
     print(f"Arguments: {args}")
     print(f"Resolved output_dir: {output_dir}")
 
-    formatted_datasets = get_formatted_datasets(data_path=args.data_path, prompt_only=False)
+    formatted_datasets = (
+        load_medreason(args.data_path) if args.data_format == "medreason"
+        else get_formatted_datasets(data_path=args.data_path, prompt_only=False)
+    )
     if args.max_train_samples > 0:
         formatted_datasets["train"] = formatted_datasets["train"].select(
             range(min(args.max_train_samples, len(formatted_datasets["train"])))
@@ -258,6 +264,8 @@ def main():
     configure_tokenizer(tokenizer, args.model_path)
 
     def tokenize_text(examples: Dict[str, str]) -> Dict[str, object]:
+        if args.data_format == "medreason":
+            return tokenize_medreason(examples, tokenizer, args.max_length)
         out = tokenizer(examples["text"], truncation=True, max_length=args.max_length)
         if out["input_ids"] and out["input_ids"][-1] != tokenizer.eos_token_id and len(out["input_ids"]) < args.max_length:
             out["input_ids"].append(tokenizer.eos_token_id)
@@ -273,7 +281,12 @@ def main():
     )
     print(f"Tokenized datasets: {tokenized_datasets}")
 
-    data_collator = DataCollatorForLanguageModeling(tokenizer, mlm=False, pad_to_multiple_of=8, return_tensors="pt")
+    if args.data_format == "medreason":
+        data_collator = DataCollatorForSeq2Seq(
+            tokenizer, label_pad_token_id=-100, pad_to_multiple_of=8, return_tensors="pt"
+        )
+    else:
+        data_collator = DataCollatorForLanguageModeling(tokenizer, mlm=False, pad_to_multiple_of=8, return_tensors="pt")
 
     dtype = torch.bfloat16 if args.bf16 else torch.float16
     base_model = AutoModelForCausalLM.from_pretrained(
@@ -363,7 +376,10 @@ def main():
         merged_dir = os.path.join(output_dir, "merged")
         merged_model = model.merge_and_unload()
         merged_model.config.use_cache = True
-        merged_model.save_pretrained(merged_dir, safe_serialization=True)
+        save_kwargs = {}
+        if merged_model.config.model_type in {"qwen3_5_text", "qwen3_5_moe_text"}:
+            save_kwargs["save_original_format"] = False
+        merged_model.save_pretrained(merged_dir, safe_serialization=True, **save_kwargs)
         tokenizer.save_pretrained(merged_dir)
         print(f"Merged model saved to {merged_dir}")
 

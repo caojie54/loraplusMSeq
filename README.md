@@ -8,10 +8,17 @@ For each n-batch, the trainer first updates LoRA parameters. It then selects ori
 
 ```bash
 # create enviroment
-conda create -n mlora python==3.13
+conda create -n mlora python==3.12
 
 # Install required dependencies
 pip install -r requirements.txt
+
+# Install sglang for med eval
+pip install uv
+# 根据sglang 官方文档，安装了，后续med eval只需要额外安装https；
+uv pip install --prerelease=allow sglang
+
+pip install flash-linear-attention
 
 ```
 

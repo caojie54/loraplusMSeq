@@ -3,20 +3,20 @@ set -euo pipefail
 
 cd "$(dirname "$0")"
 
-source /mnt/petrelfs/caojie1/anaconda3/etc/profile.d/conda.sh
-conda activate loraplusm
+# source /mnt/petrelfs/caojie1/anaconda3/etc/profile.d/conda.sh
+# conda activate loraplusm
 
 export TOKENIZERS_PARALLELISM=${TOKENIZERS_PARALLELISM:-false}
 export PYTORCH_CUDA_ALLOC_CONF=${PYTORCH_CUDA_ALLOC_CONF:-expandable_segments:True}
-export HF_HOME=${HF_HOME:-/mnt/dhwfile/raise/user/caojie/huggingface}
+# export HF_HOME=${HF_HOME:-/mnt/dhwfile/raise/user/caojie/huggingface}
 export HF_HUB_OFFLINE=${HF_HUB_OFFLINE:-1}
 export TRANSFORMERS_OFFLINE=${TRANSFORMERS_OFFLINE:-1}
 
 METHOD=${METHOD:-alpha}
 BASE_MODEL_PATH=${BASE_MODEL_PATH:-meta-llama/Llama-3.1-8B}
-DATASET_PATH=${DATASET_PATH:-/mnt/petrelfs/caojie1/projects/CoMoL/datasets/natural_reasoning_20k}
-EVAL_DATA_PATH=${EVAL_DATA_PATH:-/mnt/petrelfs/caojie1/projects/CoMoL/datasets/natural_reasoning_eval}
-OUTPUT_ROOT=${OUTPUT_ROOT:-/mnt/dhwfile/raise/user/caojie/loraplusMSeq/outputs/natural-reasoning-20k}
+DATASET_PATH=${DATASET_PATH:-/data/user/cj/projects/CoMoL/datasets/natural_reasoning_20k}
+EVAL_DATA_PATH=${EVAL_DATA_PATH:-/data/user/cj/projects/CoMoL/datasets/natural_reasoning_eval}
+OUTPUT_ROOT=${OUTPUT_ROOT:-/data/user/cj/data2/experiments/loraplusMSeq/outputs/natural-reasoning-20k}
 RANK=${RANK:-64}
 LORA_LR=${LORA_LR:-1e-4}
 MODULE_LR=${MODULE_LR:-1e-5}
@@ -85,31 +85,7 @@ TEST_MAX_NEW_TOKENS=${TEST_MAX_NEW_TOKENS:-1536}
 TEST_BATCH_SIZE=${TEST_BATCH_SIZE:-64}
 NATURAL_REASONING_BENCHMARKS=${NATURAL_REASONING_BENCHMARKS:-gpqa_diamond math_500 mmlu_pro_500}
 
-if [[ "${REQUIRED_FREE_GB}" != "0" ]]; then
-  echo "Initial CUDA_VISIBLE_DEVICES=${CUDA_VISIBLE_DEVICES:-}"
-  echo "SLURM_JOB_GPUS=${SLURM_JOB_GPUS:-}"
-  nvidia-smi || true
-  allocated_gpu="${CUDA_VISIBLE_DEVICES:-${SLURM_JOB_GPUS:-}}"
-  allocated_gpu="${allocated_gpu%%,*}"
-  allocated_gpu="${allocated_gpu//[[:space:]]/}"
-  if [[ "${allocated_gpu}" =~ ^[0-9]+$ ]]; then
-    query_gpu="${allocated_gpu}"
-  else
-    query_gpu=0
-  fi
-  IFS=, read -r gpu_id total_mem used_mem < <(
-    nvidia-smi -i "${query_gpu}" --query-gpu=index,memory.total,memory.used --format=csv,noheader,nounits
-  )
-  gpu_id="${gpu_id//[[:space:]]/}"
-  total_mem="${total_mem//[[:space:]]/}"
-  used_mem="${used_mem//[[:space:]]/}"
-  free_mem_gb=$(( (total_mem - used_mem) / 1024 ))
-  echo "Allocated GPU check: query_gpu=${query_gpu} nvidia_gpu=${gpu_id} total=${total_mem}MiB used=${used_mem}MiB free=${free_mem_gb}GiB required=${REQUIRED_FREE_GB}GiB"
-  if (( free_mem_gb < REQUIRED_FREE_GB )); then
-    echo "Allocated GPU does not have enough free memory; exiting for resubmission."
-    exit 2
-  fi
-fi
+source scripts/select_free_gpu.sh
 
 python train.py \
   --model_path="${BASE_MODEL_PATH}" \

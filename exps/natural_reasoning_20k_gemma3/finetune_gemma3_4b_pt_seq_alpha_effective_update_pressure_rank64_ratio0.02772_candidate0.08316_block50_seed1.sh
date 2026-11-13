@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+export CUDA_VISIBLE_DEVICES=1,2,4,5
+
 BASE_MODEL_PATH=google/gemma-3-4b-pt \
-OUTPUT_ROOT=/mnt/dhwfile/raise/user/caojie/loraplusMSeq/outputs/natural-reasoning-20k-gemma-3-4b-pt \
+OUTPUT_ROOT=/data/user/cj/experiments/loraplusMSeq/outputs/natural-reasoning-20k/gemma-3-4b-pt \
 METHOD=alpha \
 ALPHA_SCORE=lora_effective_update_pressure \
 ALPHA_CANDIDATE_RATIO=0.08316 \

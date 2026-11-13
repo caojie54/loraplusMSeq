@@ -8,4 +8,4 @@ tqdm
 tensorboardX
 pyarrow==20.0.0
 fire
-transformers==5.13.0
+transformers==5.19.0

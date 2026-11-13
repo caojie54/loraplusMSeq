@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+export CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6 
+
 BASE_MODEL_PATH=google/gemma-3-4b-pt \
-OUTPUT_ROOT=/mnt/dhwfile/raise/user/caojie/loraplusMSeq/outputs/natural-reasoning-20k-gemma-3-4b-pt \
+OUTPUT_ROOT=/data/user/cj/experiments/loraplusMSeq/outputs/natural-reasoning-20k/gemma-3-4b-pt \
 METHOD=lora \
 RANK=64 \
 NUM_TRAIN_EPOCHS=2 \
