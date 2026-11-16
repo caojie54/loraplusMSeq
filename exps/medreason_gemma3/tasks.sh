@@ -4,10 +4,10 @@ set -euo pipefail
 # Resolve task paths relative to this file, regardless of the caller's directory.
 script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 tasks=(
-#   finetune_gemma3_4b_pt_seq_alpha_effective_update_pressure_rank64_ratio0.02772_candidate0.08316_block100_seed0.sh
-#   finetune_gemma3_4b_pt_seq_alpha_effective_update_pressure_rank64_ratio0.02772_candidate0.08316_block200_seed0.sh
-  finetune_gemma3_4b_pt_seq_alpha_effective_update_pressure_rank64_ratio0.02772_candidate0.08316_block300_seed0.sh
-  finetune_gemma3_4b_pt_seq_alpha_effective_update_pressure_rank64_ratio0.02772_candidate0.08316_block400_seed0.sh
+  finetune_gemma3_4b_pt_seq_alpha_effective_update_pressure_rank64_ratio0.02772_block50_seed0.sh
+  finetune_gemma3_4b_pt_seq_alpha_effective_update_pressure_min_rank64_ratio0.02772_block50_seed0.sh
+  finetune_gemma3_4b_pt_lora_rank32_epoch2_medreason_seed0.sh
+  finetune_gemma3_4b_pt_lora_rank128_epoch2_medreason_seed0.sh
 )
 
 # Check the entire queue before starting any training.

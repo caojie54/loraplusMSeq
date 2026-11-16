@@ -35,18 +35,20 @@ CUDA_VISIBLE_DEVICES=0,1,6,7 python -m sglang.launch_server --model-path $model_
 
 
 log_num=0
-model_name=/data/user/cj/data2/experiments/loraplusMSeq/outputs/medreason/Qwen3-5-4B-Base/qwen3.5-4b-base-seq-alpha-lora_effective_update_pressure-candidate0.06-ratio0.02-block50-qkvogateupdown-rank64-medreason-epoch1-seed0-loraoptbf16-loralr1e-4-moduleoptfp32-reset_offload-modulelr1e-5/merged_sglang
+model_name=/data/user/cj/data2/experiments/misa/outputs/medreason/gemma-3-4b-pt/misa-gemma-3-4b-pt-medreason-qkvogateupdown-ratio0.02772-interval50-eta1.0-samplelast2-epoch2-seed0-lr1e-5/merged
 port=28${log_num}35
-CUDA_VISIBLE_DEVICES=1 python -m sglang.launch_server --model-path $model_name --port $port --mem-fraction-static 0.8 --dp 1 --tp 1  > sglang${log_num}.log 2>&1 &
+CUDA_VISIBLE_DEVICES=2 python -m sglang.launch_server --model-path $model_name --port $port --mem-fraction-static 0.8 --dp 1 --tp 1  > sglang${log_num}.log 2>&1 &
 
-log_num=0
-model_name=/data/user/cj/data2/experiments/loraplusMSeq/outputs/medreason/llama-3-1-8b/llama-3-1-8b-seq-alpha-lora_effective_update_pressure-candidate0.06-qkvogateupdown-rank64-medreason-epoch1-ratio0.02-block50-seed0-loraoptbf16-moduleoptfp32-reset_offload-loralr1e-4-modulelr1e-5/merged
+log_num=1
+model_name=/data/user/cj/data2/experiments/misa/outputs/medreason/gemma-3-4b-pt/misa-gemma-3-4b-pt-medreason-qkvogateupdown-ratio0.05544-interval50-eta1.0-samplelast2-epoch2-seed0-lr1e-5/merged
 port=28${log_num}35
-CUDA_VISIBLE_DEVICES=0,1,6,7 python -m sglang.launch_server --model-path $model_name --port $port --mem-fraction-static 0.8 --dp 4 --tp 1  > sglang${log_num}.log 2>&1 &
+CUDA_VISIBLE_DEVICES=5 python -m sglang.launch_server --model-path $model_name --port $port --mem-fraction-static 0.8 --dp 1 --tp 1  > sglang${log_num}.log 2>&1 &
 
 # stop sglang server and release GPU memory
 pkill -f sglang
 pkill -f multiprocessing.spawn
 
 # eval
-MODEL_DIR=/data/user/cj/data2/experiments/loraplusMSeq/outputs/medreason/Qwen3-5-4B-Base/qwen3.5-4b-base-seq-alpha-lora_effective_update_pressure-candidate0.06-ratio0.02-block50-qkvogateupdown-rank64-medreason-epoch1-seed0-loraoptbf16-loralr1e-4-moduleoptfp32-reset_offload-modulelr1e-5/merged_sglang bash eval_med_shell/eval_medreason.sh
+MODEL_DIR=/data/user/cj/data2/experiments/misa/outputs/medreason/gemma-3-4b-pt/misa-gemma-3-4b-pt-medreason-qkvogateupdown-ratio0.02772-interval50-eta1.0-samplelast2-epoch2-seed0-lr1e-5/merged PORT=28035 bash eval_med_shell/eval_medreason.sh
+
+MODEL_DIR=/data/user/cj/data2/experiments/misa/outputs/medreason/gemma-3-4b-pt/misa-gemma-3-4b-pt-medreason-qkvogateupdown-ratio0.05544-interval50-eta1.0-samplelast2-epoch2-seed0-lr1e-5/merged PORT=28135 bash eval_med_shell/eval_medreason.sh

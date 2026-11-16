@@ -137,6 +137,10 @@ class CompensationModuleManager:
     def enabled(self) -> bool:
         return self.method != "lora"
 
+    @property
+    def select_min_alpha_score(self) -> bool:
+        return self.alpha_score in {"lora_grad_norm_min", "lora_effective_update_pressure_min"}
+
     def _register_managed_params(self) -> None:
         for candidate in self.candidates:
             base_layer = candidate.module.base_layer
@@ -273,7 +277,7 @@ class CompensationModuleManager:
         return self.record_selection([candidate.name for candidate in selected], step=step, reason=reason)
 
     def select_by_alpha_scores(self, scores: Dict[str, float], step: int) -> List[str]:
-        select_min = self.alpha_score == "lora_grad_norm_min"
+        select_min = self.select_min_alpha_score
         if self._use_alpha_sampling():
             selected, extra_info = self._select_alpha_sampled(scores, select_min=select_min)
             return self.record_selection(
@@ -563,7 +567,7 @@ class CompensationModuleManager:
         if extra_info:
             record.update(extra_info)
         if scores is not None:
-            reverse_scores = self.alpha_score != "lora_grad_norm_min"
+            reverse_scores = not self.select_min_alpha_score
             record["scores"] = {
                 name: float(score)
                 for name, score in sorted(scores.items(), key=lambda item: item[1], reverse=reverse_scores)[:50]
@@ -624,7 +628,7 @@ class CompensationModuleManager:
                 b_term = torch.norm(b_grad.detach().float()).item() if b_grad is not None else 0.0
                 denom = math.sqrt(max(1, a_weight.numel() + b_weight.numel()))
                 total += math.sqrt(a_term * a_term + b_term * b_term) / denom
-            elif self.alpha_score == "lora_effective_update_pressure":
+            elif self.alpha_score in {"lora_effective_update_pressure", "lora_effective_update_pressure_min"}:
                 scaling = self._lora_scaling(module, adapter_name)
                 total += self._lora_effective_update_energy(
                     a_weight=a_weight,
@@ -648,7 +652,10 @@ class CompensationModuleManager:
             else:
                 raise ValueError(f"Unsupported alpha_score: {self.alpha_score}")
 
-        if self.alpha_score in {"lora_grad_norm", "lora_grad_norm_min", "lora_effective_update_pressure"}:
+        if self.alpha_score in {
+            "lora_grad_norm", "lora_grad_norm_min",
+            "lora_effective_update_pressure", "lora_effective_update_pressure_min",
+        }:
             return float(total)
         return float(total * math.log(max(2, base_num_params)))
 

@@ -116,8 +116,9 @@ def parse_args():
             "lora_grad_norm",
             "lora_grad_norm_min",
             "lora_effective_update_pressure",
+            "lora_effective_update_pressure_min",
         ],
-        help="Score accumulated from LoRA gradients during the LoRA phase.",
+        help="Score accumulated from LoRA gradients during the LoRA phase; _min variants prefer lower scores.",
     )
     parser.add_argument(
         "--alpha_candidate_ratio",

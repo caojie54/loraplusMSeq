@@ -53,6 +53,8 @@ if [[ "${METHOD}" == "alpha" ]]; then
     METHOD_DESC="${METHOD_DESC}-gradnormmin"
   elif [[ "${ALPHA_SCORE}" == "lora_effective_update_pressure" ]]; then
     METHOD_DESC="${METHOD_DESC}-effectivepressure"
+  elif [[ "${ALPHA_SCORE}" == "lora_effective_update_pressure_min" ]]; then
+    METHOD_DESC="${METHOD_DESC}-effectivepressuremin"
   else
     METHOD_DESC="${METHOD_DESC}-${ALPHA_SCORE}"
   fi

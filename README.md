@@ -24,7 +24,7 @@ pip install flash-linear-attention
 
 ## Selection methods
 
-- `alpha`: select modules by accumulated LoRA gradient pressure. Use `--alpha_score lora_grad_norm`, `lora_grad_norm_min`, or `lora_update_ratio`.
+- `alpha`: select modules by accumulated LoRA gradient pressure. Use `--alpha_score lora_grad_norm`, `lora_effective_update_pressure`, or `lora_update_ratio`. The variants `lora_grad_norm_min` and `lora_effective_update_pressure_min` keep the same raw scores but prefer smaller values. With candidate-pool sampling enabled, they use `-log(score)` before the existing size correction, normalization, and sampling. For example, set `METHOD=alpha ALPHA_SCORE=lora_effective_update_pressure_min` when running `bash task_medreason.sh` or `bash task_natural_reasoning.sh`.
 - `static_random`: sample one fixed random module set and reuse it for all module replay phases.
 - `dynamic_random`: sample a fresh random module set after every LoRA n-batch.
 - `lora`: LoRA-only baseline; module replay is skipped.

@@ -40,7 +40,7 @@ MODULE_GRADIENT_MODE=${MODULE_GRADIENT_MODE:-full}
 RESIDUAL_RTOL=${RESIDUAL_RTOL:-1e-4}
 
 case "${ALPHA_SCORE}" in
-  lora_grad_norm|lora_grad_norm_min|lora_update_ratio|lora_effective_update_pressure) ;;
+  lora_grad_norm|lora_grad_norm_min|lora_update_ratio|lora_effective_update_pressure|lora_effective_update_pressure_min) ;;
   *) echo "Unsupported ALPHA_SCORE=${ALPHA_SCORE}" >&2; exit 2 ;;
 esac
 
