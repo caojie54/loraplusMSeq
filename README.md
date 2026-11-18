@@ -27,9 +27,34 @@ pip install flash-linear-attention
 - `alpha`: select modules by accumulated LoRA gradient pressure. Use `--alpha_score lora_grad_norm`, `lora_effective_update_pressure`, or `lora_update_ratio`. The variants `lora_grad_norm_min` and `lora_effective_update_pressure_min` keep the same raw scores but prefer smaller values. With candidate-pool sampling enabled, they use `-log(score)` before the existing size correction, normalization, and sampling. For example, set `METHOD=alpha ALPHA_SCORE=lora_effective_update_pressure_min` when running `bash task_medreason.sh` or `bash task_natural_reasoning.sh`.
 - `static_random`: sample one fixed random module set and reuse it for all module replay phases.
 - `dynamic_random`: sample a fresh random module set after every LoRA n-batch.
-- `lora`: LoRA-only baseline; module replay is skipped.
+- `lora`: LoRA-only baseline; module replay and module scoring are skipped. Gradient scores are computed only for `alpha`; random methods also skip scoring.
 
 `--compensation_ratio` is interpreted against total original model parameters, not total candidate-module parameters. The run metadata still records `selected_candidate_param_ratio` for comparison.
+
+## NaturalReasoning-20k static random runs
+
+Each launcher below runs training, saves `merged/`, generates predictions, and
+scores `gpqa_diamond`, `math_500`, and `mmlu_pro_500`. Replace `seed0` with `seed1`
+or `seed2` to select the other training seeds:
+
+```bash
+bash exps/natural_reasoning_20k/finetune_llama_seq_static_random_rank64_ratio0.02_block50_seed0.sh
+bash exps/natural_reasoning_20k_gemma3/finetune_gemma3_4b_pt_seq_static_random_rank64_ratio0.02772_block50_seed0.sh
+```
+
+Both use rank 64, block size 50, one LoRA epoch plus module replay, length 1536,
+batch size 4 with accumulation 8, LoRA LR `1e-4`, module LR `1e-5`, BF16 LoRA
+optimizer, and FP32 module optimizer with `reset_offload`. Llama uses ratio
+`0.02` and evaluation batch 64; Gemma uses `0.02772` and evaluation batch 120.
+The sampled module set stays fixed throughout each run. Generation keeps the
+existing greedy evaluation defaults; the three seeds control training/selection.
+
+Launchers use the active Python environment and local dataset paths. They can
+be invoked from any working directory. `CUDA_VISIBLE_DEVICES` restricts GPU
+candidates; `REQUIRED_FREE_GB=0` retains the caller's GPU assignment. Outputs
+default to `.../outputs/natural-reasoning-20k/<model-tag>/<run-name>/`, with the
+training seed in each default run name. `OUTPUT_ROOT` and `RUN_NAME` can override
+these locations.
 
 ## Optimizer state
 
@@ -92,3 +117,36 @@ Runs write under `/mnt/dhwfile/raise/user/caojie/loraplusMSeq/outputs` by defaul
 - `trainable_params.json`: LoRA/module trainable parameter stats, optimizer strategy, optimizer dtype, gradient mode, and ratio denominator.
 - `train_metrics.json`: training loss/runtime and the same key optimizer/state metadata.
 - `predictions/` and `natural_reasoning_acc_score.jsonl` for NaturalReasoning runs when evaluation is enabled.
+
+## Training memory statistics
+
+`memory_log.jsonl` records **every optimizer update**, including the final partial
+logging interval. Phases are `lora` / `module` in loraplusMSeq and `misa` in MISA.
+Both projects use the same counters and sampling rules:
+
+- `peak_memory_gib`: allocated-memory peak of this update, with CUDA peak counters
+  reset at its start; this includes the live model/optimizer baseline.
+- `max_memory_gib`: maximum update peak observed so far.
+- `avg_peak_memory_gib`: arithmetic mean of update peaks over **all
+  completed updates**, not averages of cumulative maxima or of printed logs.
+- `memory_samples`: number of updates included in the averages.
+
+`train_log.jsonl` includes overall running statistics and `phase_memory` for the
+current phase. `train_metrics.json` includes overall statistics and
+`memory_by_phase` summaries. Overall means are weighted by update count, not by
+phase count or wall time. Current allocated memory and its average are not
+queried or recorded.
+
+These are PyTorch **allocated** bytes divided by `1024**3` on the model's input
+device (`memory_device`), not allocator-reserved memory, total GPU usage, or a
+sum over multiple GPUs. CPU execution records zero. Counters are read without
+adding CUDA synchronizations or emptying the allocator cache.
+
+Measurements exclude model loading, validation, saving, and transitions outside
+updates. LoRA state restoration is inside its update; module selection/optimizer
+setup is included in the first replay update. MISA's optimizer-step module switch
+is included in that update. Existing persistent model/optimizer tensors still
+count toward every update's absolute footprint. These training-only maxima
+replace the old process-lifetime `max_memory_gib` and are not directly comparable
+to old logs. Clearing temporary forward outputs also avoids retaining previous
+microbatch logits during the next forward pass.

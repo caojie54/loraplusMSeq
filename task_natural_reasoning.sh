@@ -14,16 +14,20 @@ export TRANSFORMERS_OFFLINE=${TRANSFORMERS_OFFLINE:-1}
 
 METHOD=${METHOD:-alpha}
 BASE_MODEL_PATH=${BASE_MODEL_PATH:-meta-llama/Llama-3.1-8B}
+# Derive the default model label from a Hub ID or local model directory.
+MODEL_TAG=${BASE_MODEL_PATH%/}
+MODEL_TAG=${MODEL_TAG##*/}
+MODEL_TAG=${MODEL_TAG,,}
 DATASET_PATH=${DATASET_PATH:-/data/user/cj/projects/CoMoL/datasets/natural_reasoning_20k}
 EVAL_DATA_PATH=${EVAL_DATA_PATH:-/data/user/cj/projects/CoMoL/datasets/natural_reasoning_eval}
-OUTPUT_ROOT=${OUTPUT_ROOT:-/data/user/cj/data2/experiments/loraplusMSeq/outputs/natural-reasoning-20k}
+OUTPUT_ROOT=${OUTPUT_ROOT:-/data/user/cj/data2/experiments/loraplusMSeq/outputs/natural-reasoning-20k/${MODEL_TAG}}
 RANK=${RANK:-64}
 LORA_LR=${LORA_LR:-1e-4}
 MODULE_LR=${MODULE_LR:-1e-5}
 LORA_DROPOUT=${LORA_DROPOUT:-0.0}
 SEED=${SEED:-0}
 COMP_RATIO=${COMP_RATIO:-0.02}
-SELECTION_INTERVAL=${SELECTION_INTERVAL:-625}
+SELECTION_INTERVAL=${SELECTION_INTERVAL:-50}
 ALPHA_SCORE=${ALPHA_SCORE:-lora_grad_norm}
 ALPHA_CANDIDATE_RATIO=${ALPHA_CANDIDATE_RATIO:-0}
 ALPHA_SAMPLING_TEMPERATURE=${ALPHA_SAMPLING_TEMPERATURE:-1.0}
@@ -38,7 +42,7 @@ RESIDUAL_RTOL=${RESIDUAL_RTOL:-1e-4}
 MODULE_OPTIMIZER_STATE_STRATEGY=${MODULE_OPTIMIZER_STATE_STRATEGY:-reset_offload}
 
 if [[ "${METHOD}" == "lora" ]]; then
-  NUM_TRAIN_EPOCHS=${NUM_TRAIN_EPOCHS:-1}
+  NUM_TRAIN_EPOCHS=${NUM_TRAIN_EPOCHS:-2}
   SAVE_MERGED_MODEL=${SAVE_MERGED_MODEL:-false}
 else
   NUM_TRAIN_EPOCHS=${NUM_TRAIN_EPOCHS:-1}
@@ -75,7 +79,7 @@ if [[ "${MODULE_GRADIENT_MODE}" != "full" ]]; then
   METHOD_DESC="${METHOD_DESC}-modulegrad-${MODULE_GRADIENT_MODE}"
 fi
 
-RUN_NAME=${RUN_NAME:-llama-3-1-8b-seq-${METHOD_DESC}-qkvogateupdown-rank${RANK}-natural-reasoning-20k-epoch${NUM_TRAIN_EPOCHS}-ratio${COMP_RATIO}-block${SELECTION_INTERVAL}-loralr${LORA_LR}-modulelr${MODULE_LR}}
+RUN_NAME=${RUN_NAME:-${MODEL_TAG}-seq-${METHOD_DESC}-qkvogateupdown-rank${RANK}-natural-reasoning-20k-epoch${NUM_TRAIN_EPOCHS}-seed${SEED}-ratio${COMP_RATIO}-block${SELECTION_INTERVAL}-loralr${LORA_LR}-modulelr${MODULE_LR}}
 EVAL_AFTER_TRAIN=${EVAL_AFTER_TRAIN:-1}
 MAX_LENGTH=${MAX_LENGTH:-1536}
 TRAIN_BATCH_SIZE=${TRAIN_BATCH_SIZE:-4}

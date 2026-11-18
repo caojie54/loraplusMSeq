@@ -14,6 +14,7 @@ from torch.utils.data import DataLoader
 from tqdm.auto import tqdm
 
 from .fp32_shadow_optimizer import Fp32ShadowAdamW
+from .memory_stats import CudaMemoryTracker
 from .module_selection import CompensationModuleManager
 from .residual_gradient import attach_residual_grad_hooks, remove_hooks
 
@@ -108,8 +109,13 @@ class SequentialLoraPlusMTrainer:
         self._optimizer_state_restore_events = 0
         self._optimizer_state_tensors_moved = 0
 
+        self.memory_tracker = CudaMemoryTracker(self._model_input_device())
+
     def train(self) -> Dict[str, object]:
         os.makedirs(self.output_dir, exist_ok=True)
+        self.memory_tracker = CudaMemoryTracker(
+            self._model_input_device(), os.path.join(self.output_dir, "memory_log.jsonl")
+        )
         if os.path.exists(self._train_log_path):
             os.remove(self._train_log_path)
         if os.path.exists(self._trainable_params_path):
@@ -196,7 +202,7 @@ class SequentialLoraPlusMTrainer:
             "optimizer_state_offload_events": int(self._optimizer_state_offload_events),
             "optimizer_state_restore_events": int(self._optimizer_state_restore_events),
             "optimizer_state_tensors_moved": int(self._optimizer_state_tensors_moved),
-            "max_memory_gib": float(self._max_cuda_memory_gib()),
+            **self.memory_tracker.metrics(),
         }
         with open(os.path.join(self.output_dir, "train_metrics.json"), "w", encoding="utf-8") as f:
             json.dump(metrics, f, ensure_ascii=False, indent=2)
@@ -237,15 +243,17 @@ class SequentialLoraPlusMTrainer:
         optimizer: torch.optim.Optimizer,
         block_scores: Dict[str, float],
     ) -> float:
+        self.memory_tracker.begin("lora", self.global_step + 1)
         self.module_manager.set_lora_phase()
         self._prepare_lora_optimizer_for_lora_phase(optimizer)
         self._set_optimizer_lr(optimizer, self.learning_rate)
         optimizer.zero_grad(set_to_none=True)
 
         loss_value = self._backward_update_batch(update_batch)
-        # The alpha strategy uses the LoRA gradient pressure accumulated over the whole n-batch.
-        for name, score in self.module_manager.score_from_lora_grads().items():
-            block_scores[name] += score
+        # Only alpha selection consumes scores; LoRA and random baselines do not.
+        if self.module_manager.method == "alpha":
+            for name, score in self.module_manager.score_from_lora_grads().items():
+                block_scores[name] += score
 
         lora_named_params = self.module_manager.lora_named_parameters()
         if isinstance(optimizer, Fp32ShadowAdamW):
@@ -256,6 +264,7 @@ class SequentialLoraPlusMTrainer:
             self._clip_gradients([param for _, param in lora_named_params])
             optimizer.step()
         optimizer.zero_grad(set_to_none=True)
+        self.memory_tracker.end()
         return loss_value
 
     def _run_module_replay_block(
@@ -268,6 +277,8 @@ class SequentialLoraPlusMTrainer:
         if self.module_manager.method == "lora":
             return False
 
+        # Include module selection/optimizer setup in the first replay update's peak.
+        self.memory_tracker.begin("module", self.global_step + 1)
         self._select_modules_for_block(block_scores)
         self.module_manager.set_module_phase()
         self._record_module_trainable_params(block)
@@ -276,13 +287,16 @@ class SequentialLoraPlusMTrainer:
         )
         if module_optimizer is None:
             self.module_manager.freeze_all_compensation()
+            self.memory_tracker.cancel()
             return False
 
         hook_handles = []
         try:
-            hook_handles = self._attach_module_gradient_hooks()
+            hook_handles = self._attach_module_gradient_hooks() # TODO: 移除没用的residual gradient
             self._prepare_module_optimizer_for_module_phase(module_optimizer)
-            for update_batch in block:
+            for update_index, update_batch in enumerate(block):
+                if update_index:
+                    self.memory_tracker.begin("module", self.global_step + 1)
                 self._set_optimizer_lr(module_optimizer, self.module_learning_rate)
                 module_optimizer.zero_grad(set_to_none=True)
                 module_loss = self._backward_update_batch(update_batch)
@@ -296,6 +310,7 @@ class SequentialLoraPlusMTrainer:
                     module_optimizer.step()
                 module_optimizer.zero_grad(set_to_none=True)
 
+                self.memory_tracker.end()
                 losses["module"].append(module_loss)
                 self.module_step += 1
                 self.global_step += 1
@@ -630,6 +645,7 @@ class SequentialLoraPlusMTrainer:
                 loss = outputs.loss
             total_loss += float(loss.detach().float().item())
             (loss * scale).backward()
+            del outputs, loss, inputs
         return total_loss / max(1, len(update_batch))
 
     def _autocast_context(self):
@@ -807,13 +823,12 @@ class SequentialLoraPlusMTrainer:
             "lora_loss": sum(losses["lora"][-self.logging_steps :]) / max(1, len(losses["lora"][-self.logging_steps :])),
             "module_loss": sum(losses["module"][-self.logging_steps :])
             / max(1, len(losses["module"][-self.logging_steps :])),
-            "max_memory_gib": float(self._max_cuda_memory_gib()),
+            **self.memory_tracker.summary(),
+            "phase_memory": self.memory_tracker.summary(phase),
         }
         with open(self._train_log_path, "a", encoding="utf-8") as f:
             f.write(json.dumps(record, ensure_ascii=False) + "\n")
         print(f"[loraplusMSeq] log {record}", flush=True)
 
     def _max_cuda_memory_gib(self) -> float:
-        if not torch.cuda.is_available():
-            return 0.0
-        return float(torch.cuda.max_memory_allocated() / 1024**3)
+        return float(self.memory_tracker.summary()["max_memory_gib"])

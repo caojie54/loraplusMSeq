@@ -9,15 +9,14 @@ export OUTPUT_ROOT=${OUTPUT_ROOT:-/data/user/cj/data2/experiments/loraplusMSeq/o
 export METHOD=lora
 export RANK=64
 export NUM_TRAIN_EPOCHS=2
-export SEED=0
+export SEED=2
 export LORA_OPTIMIZER_DTYPE=bf16
 export LORA_LR=1e-4
 export SAVE_MERGED_MODEL=true
-export RUN_NAME=${RUN_NAME:-gemma-3-4b-pt-lora-qkvogateupdown-rank64-medreason-epoch2-seed0-loraoptbf16-loralr1e-4}
 export MAX_LENGTH=${MAX_LENGTH:-1200}
 export TRAIN_BATCH_SIZE=${TRAIN_BATCH_SIZE:-4}
 export GRADIENT_ACCUMULATION_STEPS=${GRADIENT_ACCUMULATION_STEPS:-8}
 export GRADIENT_CHECKPOINTING=${GRADIENT_CHECKPOINTING:-false}
-export REQUIRED_FREE_GB=${REQUIRED_FREE_GB:-75}
+export REQUIRED_FREE_GB=${REQUIRED_FREE_GB:-60}
 
 bash task_medreason.sh
