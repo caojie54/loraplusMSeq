@@ -103,8 +103,8 @@ srun -p sciverse_agent --job-name=nr20k_mseq --ntasks-per-node=1 --cpus-per-task
 
 NaturalReasoning task defaults:
 
-- train data: `/mnt/petrelfs/caojie1/projects/CoMoL/datasets/natural_reasoning_20k`
-- eval data: `/mnt/petrelfs/caojie1/projects/CoMoL/datasets/natural_reasoning_eval`
+- train data: `/data/user/cj/projects/loraplusMSeq/datasets/natural_reasoning_20k`
+- eval data: `/data/user/cj/projects/loraplusMSeq/datasets/natural_reasoning_eval`
 - eval benchmarks: `gpqa_diamond math_500 mmlu_pro_500`
 - test generation: `max_new_tokens=1536`, `batch_size=64`
 
@@ -150,3 +150,25 @@ count toward every update's absolute footprint. These training-only maxima
 replace the old process-lifetime `max_memory_gib` and are not directly comparable
 to old logs. Clearing temporary forward outputs also avoids retaining previous
 microbatch logits during the next forward pass.
+
+## Dataset locations and MedReason result directory
+
+NaturalReasoning training and evaluation data default to
+`/data/user/cj/projects/loraplusMSeq/datasets/natural_reasoning_20k` and
+`/data/user/cj/projects/loraplusMSeq/datasets/natural_reasoning_eval` in both
+loraplusMSeq and MISA launchers. MedReason evaluation data and code are under
+`/data/user/cj/projects/loraplusMSeq/MedReason/{eval_data,evaluation}`.
+MedReason training data remains in `/data/user/cj/datasets/MedReason`.
+
+The evaluation CLI accepts `--results_dir /path/to/results` and writes
+`<results_dir>/<task_floder>/logs/` and `<results_dir>/<task_floder>/result/`.
+The default is `./results`, relative to the working directory of `eval.py`.
+The wrapper changes directory to `MEDREASON_ROOT` and accepts `RESULTS_DIR`:
+
+```bash
+MODEL_DIR=/path/to/run/merged PORT=28035 RESULTS_DIR=/path/to/eval-results \
+  bash /data/user/cj/projects/loraplusMSeq/eval_med_shell/eval_medreason.sh
+```
+
+SGLang must already be serving the specified model. With no override, wrapper
+results are saved under `loraplusMSeq/MedReason/results/`.

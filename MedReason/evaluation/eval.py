@@ -57,6 +57,8 @@ def main():
     parser.add_argument('--port', type=int, default=30000)
     parser.add_argument('--batch_size', type=int, default=200)    
     parser.add_argument('--task_floder', type=str, default='anonymous_run')
+    parser.add_argument('--results_dir', type=str, default='./results',
+                        help='Result root directory; relative paths are resolved from the current working directory.')
     args = parser.parse_args()
 
 
@@ -132,13 +134,9 @@ def main():
             item["output"] = pred
             final_results.append(item)
 
-    # make dir task_floder under ./results
-    task_floder = f'./results/{args.task_floder}'
-    if not os.path.exists(task_floder):
-        os.makedirs(task_floder)
-        # mkdir logs and result under task_floder
-        os.makedirs(f'{task_floder}/logs')
-        os.makedirs(f'{task_floder}/result')
+    task_floder = os.path.join(args.results_dir, args.task_floder)
+    os.makedirs(os.path.join(task_floder, 'logs'), exist_ok=True)
+    os.makedirs(os.path.join(task_floder, 'result'), exist_ok=True)
 
     task_name = os.path.split(args.model_name)[-1]
 

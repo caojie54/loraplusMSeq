@@ -142,12 +142,10 @@ def get_results(res_path):
     print(f"*Logging_file: {res_file_name}*")
     print(json.dumps(res,indent=4))
     
-    # save results, replace logs with results
-    result_path = res_path.replace('logs','result')
-    result_file_name = os.path.basename(result_path)
-    # add 'result_' prefix to the result file name
-    result_file_name = 'result_' + result_file_name
-    result_path = os.path.join(os.path.dirname(result_path), result_file_name)
+    # Write beside the logs directory without changing names in the custom root.
+    result_dir = os.path.join(os.path.dirname(os.path.dirname(res_path)), 'result')
+    os.makedirs(result_dir, exist_ok=True)
+    result_path = os.path.join(result_dir, 'result_' + os.path.basename(res_path))
     with open(result_path,'w') as fw:
         json.dump(res,fw,ensure_ascii=False,indent=2)
 

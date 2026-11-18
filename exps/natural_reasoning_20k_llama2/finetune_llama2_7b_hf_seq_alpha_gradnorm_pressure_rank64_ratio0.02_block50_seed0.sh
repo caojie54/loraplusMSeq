@@ -3,8 +3,8 @@ set -euo pipefail
 
 cd "$(dirname "$0")/../.."
 
-DATASET_PATH=/mnt/petrelfs/caojie1/projects/CoMoL/datasets/natural_reasoning_20k \
-EVAL_DATA_PATH=/mnt/petrelfs/caojie1/projects/CoMoL/datasets/natural_reasoning_eval \
+DATASET_PATH=/data/user/cj/projects/loraplusMSeq/datasets/natural_reasoning_20k \
+EVAL_DATA_PATH=/data/user/cj/projects/loraplusMSeq/datasets/natural_reasoning_eval \
 OUTPUT_ROOT=/mnt/dhwfile/raise/user/caojie/loraplusMSeq/outputs/natural-reasoning-20k-llama-2-7b-hf \
 BASE_MODEL_PATH=meta-llama/Llama-2-7b-hf \
 MAX_LENGTH=1536 \

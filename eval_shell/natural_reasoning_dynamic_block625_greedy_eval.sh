@@ -14,7 +14,7 @@ export TRANSFORMERS_OFFLINE=${TRANSFORMERS_OFFLINE:-1}
 
 MODEL_DIR=/mnt/dhwfile/raise/user/caojie/loraplusMSeq/outputs/natural-reasoning-20k/llama-3-1-8b-seq-dynamic_random-qkvogateupdown-rank64-natural-reasoning-20k-epoch1-ratio0.02-block625-loraoptbf16-moduleoptfp32-resetoffload-loralr1e-4-modulelr1e-5
 OUTPUT_DIR=${MODEL_DIR}/eval_bs64_greedy_default_20260701_rerun
-DATA_PATH=/mnt/petrelfs/caojie1/projects/CoMoL/datasets/natural_reasoning_eval
+DATA_PATH=/data/user/cj/projects/loraplusMSeq/datasets/natural_reasoning_eval
 BENCHMARKS=(gpqa_diamond math_500 mmlu_pro_500)
 REQUIRED_FREE_GB=${REQUIRED_FREE_GB:-65}
 

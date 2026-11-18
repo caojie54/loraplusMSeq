@@ -84,7 +84,7 @@ def parse_args():
     parser.add_argument(
         "--data_path",
         type=str,
-        default="/mnt/petrelfs/caojie1/projects/CoMoL/datasets/natural_reasoning_eval",
+        default="/data/user/cj/projects/loraplusMSeq/datasets/natural_reasoning_eval",
     )
     parser.add_argument("--benchmarks", nargs="+", default=["gpqa_diamond", "math_500", "mmlu_pro_500"])
     parser.add_argument("--max_new_tokens", type=int, default=1536)

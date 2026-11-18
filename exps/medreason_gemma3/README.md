@@ -47,7 +47,7 @@ Choose an available GPU and an unused port. In another terminal, activate
 PORT=28035 MODEL_DIR="$MODEL_DIR" bash eval_med_shell/eval_medreason.sh
 ```
 
-This invokes `MedReason/src/evaluation/eval.py` for medbullets_op4,
+This invokes `MedReason/evaluation/eval.py` for medbullets_op4,
 medbullets_op5, HLE_biomed, medqa_test, and MedXpertQA_test, with
 `--strict_prompt --no-use_chat_template`. It preserves MedReason's plain-text
 multiple-choice evaluation prompt (different wording from the training

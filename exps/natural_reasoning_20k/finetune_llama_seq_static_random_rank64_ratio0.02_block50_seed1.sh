@@ -5,8 +5,8 @@ cd "$(dirname "$0")/../.."
 # Train, generate predictions from merged/, then score all three benchmarks.
 # Infrastructure paths and GPU selection may be overridden by the caller.
 BASE_MODEL_PATH=${BASE_MODEL_PATH:-meta-llama/Llama-3.1-8B} \
-DATASET_PATH=${DATASET_PATH:-/data/user/cj/projects/CoMoL/datasets/natural_reasoning_20k} \
-EVAL_DATA_PATH=${EVAL_DATA_PATH:-/data/user/cj/projects/CoMoL/datasets/natural_reasoning_eval} \
+DATASET_PATH=${DATASET_PATH:-/data/user/cj/projects/loraplusMSeq/datasets/natural_reasoning_20k} \
+EVAL_DATA_PATH=${EVAL_DATA_PATH:-/data/user/cj/projects/loraplusMSeq/datasets/natural_reasoning_eval} \
 METHOD=static_random \
 RANK=64 \
 COMP_RATIO=0.02 \
