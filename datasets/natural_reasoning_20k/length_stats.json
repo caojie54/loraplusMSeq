@@ -1,0 +1,34 @@
+{
+  "instruction_chars": {
+    "count": 20000,
+    "mean": 439.84,
+    "p50": 429,
+    "p90": 597,
+    "p95": 655,
+    "p99": 787,
+    "max": 1484
+  },
+  "output_chars": {
+    "count": 20000,
+    "mean": 3041.84,
+    "p50": 2813,
+    "p90": 4770,
+    "p95": 5311,
+    "p99": 6363,
+    "max": 25228
+  },
+  "total_chars": {
+    "count": 20000,
+    "mean": 3481.68,
+    "p50": 3281,
+    "p90": 5245,
+    "p95": 5810,
+    "p99": 6884,
+    "max": 25513
+  },
+  "sample": {
+    "size": 20000,
+    "source": "datasets/natural_reasoning/train.jsonl",
+    "validation_source": "datasets/natural_reasoning/validation.jsonl"
+  }
+}
