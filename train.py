@@ -9,7 +9,7 @@ from typing import Dict
 import torch
 import transformers
 from peft import LoraConfig, TaskType, get_peft_model
-from transformers import AutoModelForCausalLM, AutoTokenizer, DataCollatorForLanguageModeling, DataCollatorForSeq2Seq
+from transformers import AutoModelForCausalLM, AutoProcessor, AutoTokenizer, DataCollatorForLanguageModeling, DataCollatorForSeq2Seq
 
 from loraplusmseq.data import get_formatted_datasets
 from loraplusmseq.medreason_data import load_medreason, tokenize_medreason
@@ -296,6 +296,10 @@ def main():
         device_map="auto",
         trust_remote_code=args.trust_remote_code,
     )
+    processor = None
+    if args.save_merged_model and base_model.config.model_type == "gemma4_unified":
+        processor = AutoProcessor.from_pretrained(args.model_path, trust_remote_code=args.trust_remote_code)
+        processor.tokenizer = tokenizer
     base_model.config.use_cache = False
     if args.gradient_checkpointing:
         base_model.gradient_checkpointing_enable()
@@ -381,7 +385,10 @@ def main():
         if merged_model.config.model_type in {"qwen3_5_text", "qwen3_5_moe_text"}:
             save_kwargs["save_original_format"] = False
         merged_model.save_pretrained(merged_dir, safe_serialization=True, **save_kwargs)
-        tokenizer.save_pretrained(merged_dir)
+        if processor is not None:
+            processor.save_pretrained(merged_dir)
+        else:
+            tokenizer.save_pretrained(merged_dir)
         print(f"Merged model saved to {merged_dir}")
 
 

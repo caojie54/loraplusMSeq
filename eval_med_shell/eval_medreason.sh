@@ -2,8 +2,8 @@
 set -euo pipefail
 
 # Start SGLang on MODEL_DIR first; --model_name in eval.py does not load weights.
-: "${MODEL_DIR:?Set MODEL_DIR to the absolute merged/ path of the trained run}"
-[[ -f "${MODEL_DIR}/config.json" ]] || { echo "Missing model config: ${MODEL_DIR}" >&2; exit 2; }
+# : "${MODEL_DIR:?Set MODEL_DIR to the absolute merged/ path of the trained run}"
+# [[ -f "${MODEL_DIR}/config.json" ]] || { echo "Missing model config: ${MODEL_DIR}" >&2; exit 2; }
 MEDREASON_ROOT=${MEDREASON_ROOT:-/data/user/cj/projects/loraplusMSeq/MedReason}
 PORT=${PORT:-28035}
 RUN_DIR=$(dirname "${MODEL_DIR%/}")

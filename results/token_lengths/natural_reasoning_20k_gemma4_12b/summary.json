@@ -1,0 +1,109 @@
+{
+  "data_path": "/data/user/cj/projects/loraplusMSeq/datasets/natural_reasoning_20k/train.jsonl",
+  "data_sha256": "4a85d9ea5c73f9264ff109c6e9b92c8daeb3921452ecf97ac6dc9b7301adf7f2",
+  "tokenizer": "google/gemma-4-12B",
+  "tokenizer_class": "GemmaTokenizer",
+  "tokenizer_commit": null,
+  "tokenizer_backend_sha256": "bcfa281ab713b3371a046e9759838a3829ef1bbf3838c14cb0e2fb257e504693",
+  "transformers": "5.19.0",
+  "python_executable": "/data/user/cj/miniconda3/envs/mlora_sglang/bin/python",
+  "max_length": 1536,
+  "truncation_side": "right",
+  "bos_token_id": 2,
+  "eos_token_id": 1,
+  "format": "loraplusmseq.data.format_text(prompt_only=False): instruction/input template + output; tokenizer default special tokens; no chat template",
+  "length_semantics": "unpadded_full includes EOS when missing; training applies tokenizer truncation first, then adds missing EOS only if length < max_length. Lengths exclude batch padding. Percentiles use linear interpolation.",
+  "tokenized_before_eos": {
+    "count": 20000,
+    "total_tokens": 17787560,
+    "mean": 889.378,
+    "std_population": 309.7604895980118,
+    "min": 91,
+    "max": 9297,
+    "percentiles": {
+      "p1": 350.0,
+      "p5": 503.0,
+      "p10": 571.0,
+      "p25": 692.0,
+      "p50": 849.0,
+      "p75": 1032.0,
+      "p90": 1238.1000000000022,
+      "p95": 1413.0,
+      "p99": 1855.0,
+      "p99.9": 2628.0160000000615
+    }
+  },
+  "unpadded_full": {
+    "count": 20000,
+    "total_tokens": 17807560,
+    "mean": 890.378,
+    "std_population": 309.7604895980118,
+    "min": 92,
+    "max": 9298,
+    "percentiles": {
+      "p1": 351.0,
+      "p5": 504.0,
+      "p10": 572.0,
+      "p25": 693.0,
+      "p50": 850.0,
+      "p75": 1033.0,
+      "p90": 1239.1000000000022,
+      "p95": 1414.0,
+      "p99": 1856.0,
+      "p99.9": 2629.0160000000615
+    }
+  },
+  "training": {
+    "count": 20000,
+    "total_tokens": 17601497,
+    "mean": 880.07485,
+    "std_population": 264.4052664896778,
+    "min": 92,
+    "max": 1536,
+    "percentiles": {
+      "p1": 351.0,
+      "p5": 504.0,
+      "p10": 572.0,
+      "p25": 693.0,
+      "p50": 850.0,
+      "p75": 1033.0,
+      "p90": 1239.1000000000022,
+      "p95": 1414.0,
+      "p99": 1536.0,
+      "p99.9": 1536.0
+    }
+  },
+  "training_truncated_count": 661,
+  "training_truncated_percent": 3.305,
+  "training_eos_appended_count": 19337,
+  "sequence_limits": {
+    "1024": {
+      "full_exceed_count": 5209,
+      "full_exceed_percent": 26.045
+    },
+    "1200": {
+      "full_exceed_count": 2396,
+      "full_exceed_percent": 11.98
+    },
+    "1536": {
+      "full_exceed_count": 663,
+      "full_exceed_percent": 3.315
+    },
+    "2048": {
+      "full_exceed_count": 112,
+      "full_exceed_percent": 0.5599999999999999
+    },
+    "4096": {
+      "full_exceed_count": 4,
+      "full_exceed_percent": 0.02
+    },
+    "8192": {
+      "full_exceed_count": 2,
+      "full_exceed_percent": 0.01
+    },
+    "16384": {
+      "full_exceed_count": 0,
+      "full_exceed_percent": 0.0
+    }
+  }
+}
